@@ -33,6 +33,12 @@ actual=$(az containerapp show --resource-group sociobot --name sf-client-action-
 test "$actual" = "1"
 
 latest=$(az containerapp show --resource-group sociobot --name sf-client-action-room --query 'properties.latestRevisionName' --output tsv)
+for _ in $(seq 1 60); do
+  health=$(az containerapp revision show --resource-group sociobot --name sf-client-action-room --revision "$latest" --query 'properties.healthState' --output tsv)
+  [ "$health" = "Healthy" ] && break
+  sleep 5
+done
+test "$health" = "Healthy"
 while IFS= read -r revision; do
   if [ -n "$revision" ] && [ "$revision" != "$latest" ]; then
     az containerapp revision deactivate --resource-group sociobot --name sf-client-action-room --revision "$revision" --output none

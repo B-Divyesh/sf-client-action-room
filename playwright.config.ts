@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const externalBaseURL = process.env.PLAYWRIGHT_BASE_URL;
+const baseURL = externalBaseURL ?? 'http://127.0.0.1:4173';
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -8,17 +11,19 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never', outputFolder: '.factory/evidence/playwright-report' }]],
   outputDir: '.factory/evidence/test-results',
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     ...devices['Desktop Chrome'],
   },
-  webServer: {
-    command:
-      'npm run build:web && DATA_DIR=.data-test DIST_DIR=dist PORT=4173 DEMO_FIXED_NOW=2026-08-28T14:00:00Z cargo run --manifest-path server/Cargo.toml',
-    url: 'http://127.0.0.1:4173/health',
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  webServer: externalBaseURL
+    ? undefined
+    : {
+        command:
+          'npm run build:web && DATA_DIR=.data-test DIST_DIR=dist PORT=4173 DEMO_FIXED_NOW=2026-08-28T14:00:00Z cargo run --manifest-path server/Cargo.toml',
+        url: 'http://127.0.0.1:4173/health',
+        reuseExistingServer: false,
+        timeout: 120_000,
+      },
 });

@@ -128,7 +128,8 @@ test('mobile, keyboard, routing, accessibility, and request privacy smoke', asyn
   });
   page.on('pageerror', (error) => consoleErrors.push(error.message));
   page.on('request', (request) => {
-    if (new URL(request.url()).origin !== 'http://127.0.0.1:4173') outsideRequests.push(request.url());
+    const expectedOrigin = new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:4173').origin;
+    if (new URL(request.url()).origin !== expectedOrigin) outsideRequests.push(request.url());
   });
   await page.goto('/demo');
   await expect(page.locator('main')).toHaveCount(1);

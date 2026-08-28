@@ -57,6 +57,12 @@ npm run build
 
 The Playwright suite starts the built application and pins the browser package to 1.58.2. Each public claim has one test tagged `@claim:<id>` in [`e2e/claims.spec.ts`](e2e/claims.spec.ts).
 
+Run those same tests against an existing deployment with:
+
+```sh
+PLAYWRIGHT_BASE_URL=https://client-action-room.sociobot.in npm run test:e2e
+```
+
 ## Container
 
 ```sh

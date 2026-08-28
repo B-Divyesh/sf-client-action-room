@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /client
+
+Sitemap: https://client-action-room.sociobot.in/sitemap.xml

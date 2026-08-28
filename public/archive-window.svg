@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="520" viewBox="0 0 720 520" role="img" aria-labelledby="title desc">
+  <title id="title">An archive service window</title>
+  <desc id="desc">Blank docket slips cross a bronze frame into an orderly dark archive.</desc>
+  <rect width="720" height="520" fill="#162622"/>
+  <path d="M0 34H720M0 486H720" stroke="#704a2d" stroke-width="18"/>
+  <path d="M254 0V520M278 0V520" stroke="#c08b5a" stroke-width="8"/>
+  <path d="M0 402H720" stroke="#704a2d" stroke-width="22"/>
+  <g fill="#f1e8cf" stroke="#704a2d" stroke-width="4">
+    <path d="M32 84h218l20 20v74H32z"/>
+    <path d="M88 200h178l20 20v74H88z"/>
+    <path d="M168 318h100l18 18v52H168z"/>
+    <path d="M324 104h250l24 24v92H324z"/>
+    <path d="M350 246h298l24 24v98H350z"/>
+  </g>
+  <g fill="#165d56">
+    <rect x="44" y="70" width="58" height="24"/>
+    <rect x="100" y="186" width="58" height="24"/>
+    <rect x="336" y="90" width="58" height="24"/>
+    <rect x="362" y="232" width="58" height="24"/>
+  </g>
+  <g stroke="#766f5e" stroke-width="3" opacity=".8">
+    <path d="M54 124h160M54 146h122M110 242h122M110 264h84M346 150h194M346 178h142M374 294h222M374 324h172"/>
+  </g>
+  <circle cx="278" cy="402" r="18" fill="#963b30" stroke="#f1e8cf" stroke-width="4"/>
+</svg>

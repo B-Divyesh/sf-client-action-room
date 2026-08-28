@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Client Action Room service window</title>
+  <desc id="desc">Blank action slips move through a bronze archive window into a dated record.</desc>
+  <rect width="1200" height="630" fill="#f1e8cf"/>
+  <rect x="470" width="730" height="630" fill="#162622"/>
+  <path d="M448 0h42v630h-42z" fill="#704a2d"/>
+  <path d="M476 0h12v630h-12z" fill="#c08b5a"/>
+  <g fill="#fffaf0" stroke="#704a2d" stroke-width="6">
+    <path d="M92 116h342l28 28v112H92z"/>
+    <path d="M214 322h248l28 28v112H214z"/>
+    <path d="M548 124h382l30 30v136H548z"/>
+    <path d="M642 358h444l30 30v126H642z"/>
+  </g>
+  <g fill="#165d56"><rect x="112" y="94" width="92" height="36"/><rect x="568" y="102" width="92" height="36"/><rect x="662" y="336" width="92" height="36"/></g>
+  <g stroke="#766f5e" stroke-width="5"><path d="M126 170h250M126 208h192M580 184h292M580 232h210M680 418h334M680 462h240"/></g>
+  <path d="M0 555h1200" stroke="#704a2d" stroke-width="30"/>
+</svg>

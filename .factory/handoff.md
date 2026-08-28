@@ -31,11 +31,13 @@ Results:
 - `npm run build`: `dist/` produced; public JS 28.55 KB gzip, lazy auth JS 67.07 KB gzip, CSS 4.86 KB gzip; Rust release build passed.
 - `npm run test:e2e`: 12/12 Chromium tests passed across desktop and 390×844 mobile, including all ten claim tags, keyboard focus, History API routing, request privacy, and axe serious/critical checks.
 - Factory `verify-url.sh`: title, `lang`, one `h1`, `main`, image alt text, and console checks passed; desktop and 390 px screenshots were captured under `.factory/evidence/repair-final/`.
-- Lighthouse mobile against the production build: Performance 100, Accessibility 100, Best Practices 100, SEO 100; LCP 1.6 s, CLS 0.
+- Lighthouse mobile against the final live build: Performance 100, Accessibility 100, Best Practices 100, SEO 100; LCP 1.4 s, CLS 0.
 - Response policy: gzip is enabled; hashed assets return one-year immutable caching; API/client responses remain `no-store`; CSP, HSTS, `nosniff`, `no-referrer`, COOP, and Permissions Policy remain present.
 - Identity discovery returned the tenant-GUID issuer and documented JWKS URI. Missing and forged bearer tokens return `401` plus `WWW-Authenticate: Bearer`.
-- Live claim run: `PLAYWRIGHT_BASE_URL=https://client-action-room.sociobot.in npm run test:e2e` passed 12/12 on the first repair revision.
+- Final live build: `/health` reports `fea7944a8c52f1e33c3f980992dceb2364146445`; one active healthy revision, one replica, and the `/data` Azure Files mount.
+- Live claim run: `PLAYWRIGHT_BASE_URL=https://client-action-room.sociobot.in npm run test:e2e` passed 12/12.
 - Exact verifier persistence probe after single-revision routing: 20/20 fresh `POST /api/v1/demo/session/ensure` → cookie-authenticated `GET /api/v1/demo/queue` cycles returned `201 → 200`.
+- Durable restore probe: a fresh session returned four actions after an explicit restart of the live Container App revision.
 
 `docker` is not installed in this worker. The factory ACR build is the container build evidence; it succeeded from the repository Dockerfile and started as the non-root runtime user.
 

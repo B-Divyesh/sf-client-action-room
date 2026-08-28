@@ -2,11 +2,11 @@
 
 Give each client one short, deadline-based action list.
 
-Client Action Room is for small agencies and service firms that chase approvals across email. M1 ships a complete, account-free approval demo. Staff issue a scoped link, a client answers, and the audit record shows the result.
+Client Action Room is for small agencies and service firms that chase client actions across email. Staff issue a scoped link, a client acts, and the audit record shows the result.
 
 Try the deployed sample at <https://client-action-room.sociobot.in/demo>.
 
-## What M1 proves
+## What the product proves
 
 - Try a ready client action room in one click.
 - Demo changes are sample-only and resettable.
@@ -14,23 +14,27 @@ Try the deployed sample at <https://client-action-room.sociobot.in/demo>.
 - Open requests are ordered by deadline.
 - An approval records the decision, actor label, and server time.
 - An expired client link cannot read or submit the request.
+- A client PDF is type-checked, safety-scanned, and scoped.
+- A client can choose one listed option through a scoped link.
+- A client sees the destination before opening an HTTPS payment or booking link.
+- Staff can schedule one reminder and see its audit record.
 
-The upload, choice, and external-link rows are labelled previews. Real firm accounts, CIAM sign-in, file handling, and monthly billing remain in their contracted later milestones.
+The public sandbox runs all four action types without an account. Staff can use “Start for real” to sign in through the shared Sociobot Entra tenant and open an identity-isolated workspace.
 
 ## Demo boundary
 
 The sample uses Northline Studio and the Alder Street Bakery launch. `/demo` creates a random server-side namespace that expires within 24 hours. Reset destroys that namespace and creates the same four sample actions again. Client link secrets stay in URL fragments and are exchanged for scoped HttpOnly cookies; SQLite stores only SHA-256 token digests.
 
-The demo router cannot access future organization, billing, email, upload, or AI services. See [`.factory/demo.md`](.factory/demo.md) for its exact data and isolation rules.
+The demo router cannot access organization, billing, email, or AI services. Sample PDFs stay inside the demo namespace and expire with it. See [`.factory/demo.md`](.factory/demo.md) for its exact data and isolation rules.
 
 ## Stack
 
 - Svelte 5, Vite, and strict TypeScript for the browser.
-- Rust 2021, axum, and sqlx with SQLite for the M1 API.
+- Rust 2021, axum, and sqlx with SQLite for the API.
 - Reversible migrations under [`server/migrations`](server/migrations).
 - A non-root multi-stage container that serves the API and built web application on `PORT`.
 
-M2 will use the shared Sociobot Entra CIAM tenant for staff and the Sociobot recurring billing service for Dodo-backed subscriptions. This repository never handles passwords or calls Dodo directly.
+Staff authentication uses MSAL redirect with PKCE and session storage. The API validates RS256 tokens against discovered issuer and JWKS values, including audience and tenant. This repository never handles passwords, embeds provider secrets, or calls Dodo directly.
 
 ## Run locally
 
@@ -42,7 +46,7 @@ npm run build:web
 DATA_DIR=.data-local DIST_DIR=dist PORT=8080 npm run dev:api
 ```
 
-Open <http://localhost:8080/demo>. `PORT` is the only deployment variable required. `DATA_DIR`, `DATABASE_URL`, `DIST_DIR`, and `DEMO_FIXED_NOW` are optional overrides.
+Open <http://localhost:8080/demo>. `PORT` is the only deployment variable required. `DATA_DIR`, `DATABASE_URL`, `DIST_DIR`, `DEMO_FIXED_NOW`, and the documented Entra overrides are optional.
 
 For frontend-only work, run `npm run dev`; Vite does not proxy the Rust API.
 
@@ -71,7 +75,7 @@ docker run --rm -p 8080:8080 client-action-room
 curl http://localhost:8080/health
 ```
 
-The image runs as a non-root user, creates its SQLite file under `/data`, applies migrations at startup, and serves `/health` with the build SHA.
+The image runs as a non-root user, creates its SQLite file under `/data`, applies migrations at startup, and serves `/health` with the build SHA. The factory deployment mounts Azure Files and uses one writer replica.
 
 ## Deploy
 
@@ -79,7 +83,7 @@ The factory deploys the container to Azure Container Apps and owns DNS, CIAM red
 
 ## Privacy and legal
 
-The M1 demo has no analytics or third-party runtime requests. Read `/privacy` and `/terms` in the application. Approval records capture intent but are not regulated electronic signatures.
+The demo has no analytics. Only a client-chosen external action can leave the site. Read `/privacy` and `/terms` in the application. Approval records capture intent but are not regulated electronic signatures.
 
 ## Product documents
 

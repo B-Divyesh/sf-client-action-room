@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Multipart, Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -136,6 +136,41 @@ pub struct ClientActionResponse {
     pub link_expires_at: String,
     pub action: DemoAction,
     pub submission: Option<SubmissionResponse>,
+    pub choices: Vec<ActionChoice>,
+    pub external_url: Option<String>,
+    pub destination_host: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ActionChoice {
+    pub key: String,
+    pub label: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChoiceRequest {
+    actor_label: String,
+    option_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VisitRequest {
+    actor_label: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CompletionResponse {
+    pub kind: String,
+    pub actor_label: String,
+    pub detail: String,
+    pub occurred_at: String,
+    pub destination_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReminderResponse {
+    pub scheduled_for: String,
+    pub status: &'static str,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -251,36 +286,26 @@ pub async fn publish_link(
     Path(action_id): Path<String>,
 ) -> Result<Json<LinkResponse>, ApiError> {
     let session_id = valid_demo_session(&state, &headers).await?;
-    let row = sqlx::query(
-        "SELECT kind, preview_only, status FROM demo_actions WHERE id = ? AND session_id = ?",
-    )
-    .bind(&action_id)
-    .bind(&session_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| ApiError::internal())?
-    .ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_FOUND,
-            "action_not_found",
-            "That sample action is not available. Reset the demo and try again.",
-        )
-    })?;
+    let row = sqlx::query("SELECT kind, status FROM demo_actions WHERE id = ? AND session_id = ?")
+        .bind(&action_id)
+        .bind(&session_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "action_not_found",
+                "That sample action is not available. Reset the demo and try again.",
+            )
+        })?;
     let kind: String = row.get("kind");
-    let preview_only: i64 = row.get("preview_only");
     let status: String = row.get("status");
-    if kind != "approval" || preview_only != 0 {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "preview_only",
-            "This sample action is a preview. Approval links are available in M1.",
-        ));
-    }
     if status == "completed" {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             "already_completed",
-            "This approval is already complete. Reset the demo to try it again.",
+            "This action is already complete. Reset the demo to try it again.",
         ));
     }
 
@@ -306,7 +331,12 @@ pub async fn publish_link(
         &mut tx,
         &session_id,
         Some(&action_id),
-        "client_link_issued",
+        match kind.as_str() {
+            "upload" => "upload_link_issued",
+            "choice" => "choice_link_issued",
+            "external_link" => "external_link_issued",
+            _ => "client_link_issued",
+        },
         "Theo Grant",
         None,
         now,
@@ -504,6 +534,25 @@ pub async fn client_action(
     let action_id: String = row.get("action_id");
     let action = load_action(&state, &action_id).await?;
     let submission = load_submission(&state, &action_id).await?;
+    let choices = sqlx::query(
+        "SELECT option_key, label FROM demo_action_options WHERE action_id = ? ORDER BY position",
+    )
+    .bind(&action_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .into_iter()
+    .map(|item| ActionChoice {
+        key: item.get("option_key"),
+        label: item.get("label"),
+    })
+    .collect();
+    let external =
+        sqlx::query("SELECT url, destination_host FROM demo_external_links WHERE action_id = ?")
+            .bind(&action_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|_| ApiError::internal())?;
     Ok(Json(ClientActionResponse {
         firm: "Northline Studio",
         workspace: "Alder Street Bakery launch",
@@ -511,6 +560,9 @@ pub async fn client_action(
         link_expires_at: row.get("link_expires_at"),
         action,
         submission,
+        choices,
+        external_url: external.as_ref().map(|item| item.get("url")),
+        destination_host: external.map(|item| item.get("destination_host")),
     }))
 }
 
@@ -543,6 +595,18 @@ pub async fn submit_action(
             StatusCode::FORBIDDEN,
             "outside_link_scope",
             "This client link cannot open that request.",
+        ));
+    }
+    let kind: String = sqlx::query_scalar("SELECT kind FROM demo_actions WHERE id = ?")
+        .bind(&action_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    if kind != "approval" {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "wrong_action_type",
+            "Use the control shown for this request.",
         ));
     }
 
@@ -614,10 +678,320 @@ pub async fn submit_action(
     }))
 }
 
+pub async fn submit_choice(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(action_id): Path<String>,
+    Json(payload): Json<ChoiceRequest>,
+) -> Result<Json<CompletionResponse>, ApiError> {
+    enforce_same_origin(&headers)?;
+    let (session_id, grant_id) = scoped_client(&state, &headers, &action_id, "choice").await?;
+    validate_actor(&payload.actor_label)?;
+    let label: String = sqlx::query_scalar(
+        "SELECT label FROM demo_action_options WHERE action_id = ? AND option_key = ?",
+    )
+    .bind(&action_id)
+    .bind(&payload.option_key)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_choice",
+            "Choose one of the listed options.",
+        )
+    })?;
+    let now = state.now();
+    let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
+    sqlx::query("INSERT OR IGNORE INTO demo_choice_submissions (id, session_id, action_id, grant_id, actor_label, option_key, option_label, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(Uuid::now_v7().to_string()).bind(&session_id).bind(&action_id).bind(&grant_id)
+        .bind(payload.actor_label.trim()).bind(&payload.option_key).bind(&label).bind(now.to_rfc3339())
+        .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
+    complete_action(
+        &mut tx,
+        &session_id,
+        &action_id,
+        "client_choice_recorded",
+        payload.actor_label.trim(),
+        Some(&label),
+        now,
+    )
+    .await?;
+    tx.commit().await.map_err(|_| ApiError::internal())?;
+    Ok(Json(CompletionResponse {
+        kind: "choice".into(),
+        actor_label: payload.actor_label.trim().into(),
+        detail: label,
+        occurred_at: now.to_rfc3339(),
+        destination_url: None,
+    }))
+}
+
+pub async fn upload_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(action_id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Json<CompletionResponse>, ApiError> {
+    enforce_same_origin(&headers)?;
+    let (session_id, grant_id) = scoped_client(&state, &headers, &action_id, "upload").await?;
+    let mut actor = String::new();
+    let mut filename = String::new();
+    let mut bytes = Vec::new();
+    while let Some(field) = multipart.next_field().await.map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_upload",
+            "Choose a PDF file under 5 MB.",
+        )
+    })? {
+        match field.name().unwrap_or_default() {
+            "actor_label" => actor = field.text().await.unwrap_or_default(),
+            "file" => {
+                filename = field.file_name().unwrap_or("upload.pdf").to_owned();
+                bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| {
+                        ApiError::new(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_upload",
+                            "The file could not be read.",
+                        )
+                    })?
+                    .to_vec();
+            }
+            _ => {}
+        }
+    }
+    validate_actor(&actor)?;
+    if bytes.is_empty() || bytes.len() > 5 * 1024 * 1024 || !bytes.starts_with(b"%PDF-") {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unsafe_file_type",
+            "Upload one PDF file under 5 MB.",
+        ));
+    }
+    if bytes
+        .windows(5)
+        .any(|part| part.eq_ignore_ascii_case(b"EICAR"))
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "malware_detected",
+            "The safety scan rejected this file. Choose a different PDF.",
+        ));
+    }
+    let now = state.now();
+    let checksum = hex::encode(Sha256::digest(&bytes));
+    let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
+    sqlx::query("INSERT OR IGNORE INTO demo_uploads (id, session_id, action_id, grant_id, actor_label, original_filename, detected_mime, byte_size, checksum_sha256, scan_state, content, expires_at, occurred_at) VALUES (?, ?, ?, ?, ?, ?, 'application/pdf', ?, ?, 'clean', ?, ?, ?)")
+        .bind(Uuid::now_v7().to_string()).bind(&session_id).bind(&action_id).bind(&grant_id).bind(actor.trim())
+        .bind(&filename).bind(bytes.len() as i64).bind(&checksum).bind(bytes).bind((now + ChronoDuration::hours(24)).to_rfc3339()).bind(now.to_rfc3339())
+        .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
+    complete_action(
+        &mut tx,
+        &session_id,
+        &action_id,
+        "client_file_scanned",
+        actor.trim(),
+        Some("Clean PDF"),
+        now,
+    )
+    .await?;
+    tx.commit().await.map_err(|_| ApiError::internal())?;
+    Ok(Json(CompletionResponse {
+        kind: "upload".into(),
+        actor_label: actor.trim().into(),
+        detail: format!("{filename} · safety scan passed"),
+        occurred_at: now.to_rfc3339(),
+        destination_url: None,
+    }))
+}
+
+pub async fn record_external_visit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(action_id): Path<String>,
+    Json(payload): Json<VisitRequest>,
+) -> Result<Json<CompletionResponse>, ApiError> {
+    enforce_same_origin(&headers)?;
+    let (session_id, grant_id) =
+        scoped_client(&state, &headers, &action_id, "external_link").await?;
+    validate_actor(&payload.actor_label)?;
+    let row =
+        sqlx::query("SELECT url, destination_host FROM demo_external_links WHERE action_id = ?")
+            .bind(&action_id)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|_| ApiError::internal())?;
+    let url: String = row.get("url");
+    let host: String = row.get("destination_host");
+    if !url.starts_with("https://") || host == "localhost" || host.starts_with("127.") {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unsafe_destination",
+            "This destination is not a public HTTPS page.",
+        ));
+    }
+    let now = state.now();
+    let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
+    sqlx::query("INSERT OR IGNORE INTO demo_external_visits (id, session_id, action_id, grant_id, actor_label, destination_host, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(Uuid::now_v7().to_string()).bind(&session_id).bind(&action_id).bind(&grant_id).bind(payload.actor_label.trim()).bind(&host).bind(now.to_rfc3339())
+        .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
+    complete_action(
+        &mut tx,
+        &session_id,
+        &action_id,
+        "external_link_opened",
+        payload.actor_label.trim(),
+        Some(&host),
+        now,
+    )
+    .await?;
+    tx.commit().await.map_err(|_| ApiError::internal())?;
+    Ok(Json(CompletionResponse {
+        kind: "external_link".into(),
+        actor_label: payload.actor_label.trim().into(),
+        detail: format!("Opened {host}"),
+        occurred_at: now.to_rfc3339(),
+        destination_url: Some(url),
+    }))
+}
+
+pub async fn schedule_reminder(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(action_id): Path<String>,
+) -> Result<Json<ReminderResponse>, ApiError> {
+    let session_id = valid_demo_session(&state, &headers).await?;
+    let exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM demo_actions WHERE id = ? AND session_id = ? AND status = 'open'",
+    )
+    .bind(&action_id)
+    .bind(&session_id)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    if exists == 0 {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "action_not_found",
+            "Choose an open action to remind.",
+        ));
+    }
+    let now = state.now();
+    let scheduled = now + ChronoDuration::hours(1);
+    let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
+    sqlx::query("INSERT OR REPLACE INTO demo_reminders (id, session_id, action_id, scheduled_for, channel, status, created_at) VALUES (?, ?, ?, ?, 'email', 'scheduled', ?)")
+        .bind(Uuid::now_v7().to_string()).bind(&session_id).bind(&action_id).bind(scheduled.to_rfc3339()).bind(now.to_rfc3339())
+        .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
+    append_audit(
+        &mut tx,
+        &session_id,
+        Some(&action_id),
+        "reminder_scheduled",
+        "Theo Grant",
+        None,
+        now,
+    )
+    .await?;
+    tx.commit().await.map_err(|_| ApiError::internal())?;
+    Ok(Json(ReminderResponse {
+        scheduled_for: scheduled.to_rfc3339(),
+        status: "scheduled",
+    }))
+}
+
+async fn scoped_client(
+    state: &AppState,
+    headers: &HeaderMap,
+    action_id: &str,
+    kind: &str,
+) -> Result<(String, String), ApiError> {
+    let client_id = cookie_value(headers, CLIENT_COOKIE).ok_or_else(|| {
+        ApiError::unauthorized("Open the client link again to answer this request.")
+    })?;
+    let scope = client_scope(state, &client_id).await?;
+    let scoped_action: String = scope.get("action_id");
+    if scoped_action != action_id {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "outside_link_scope",
+            "This client link cannot open that request.",
+        ));
+    }
+    let actual_kind: String = sqlx::query_scalar("SELECT kind FROM demo_actions WHERE id = ?")
+        .bind(action_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    if actual_kind != kind {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "wrong_action_type",
+            "Use the control shown for this request.",
+        ));
+    }
+    Ok((scope.get("session_id"), scope.get("grant_id")))
+}
+
+async fn complete_action(
+    tx: &mut Transaction<'_, Sqlite>,
+    session_id: &str,
+    action_id: &str,
+    event: &str,
+    actor: &str,
+    detail: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<(), ApiError> {
+    sqlx::query("UPDATE demo_actions SET status = 'completed', version = version + 1 WHERE id = ? AND status = 'open'")
+        .bind(action_id).execute(&mut **tx).await.map_err(|_| ApiError::internal())?;
+    append_audit(tx, session_id, Some(action_id), event, actor, detail, now).await
+}
+
+fn validate_actor(actor: &str) -> Result<(), ApiError> {
+    if !(1..=80).contains(&actor.trim().chars().count()) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_actor_label",
+            "Enter the name that should appear in the record.",
+        ));
+    }
+    Ok(())
+}
+
 async fn provision(state: &AppState) -> Result<(String, DemoQueue), ApiError> {
+    provision_with_lifetime(state, ChronoDuration::hours(24)).await
+}
+
+pub async fn provision_staff(state: &AppState, oid: &str) -> Result<(String, DemoQueue), ApiError> {
+    if let Some(session_id) = sqlx::query_scalar::<_, String>(
+        "SELECT session_id FROM staff_workspaces WHERE entra_oid = ?",
+    )
+    .bind(oid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    {
+        if let Ok(queue) = load_queue(state, &session_id).await {
+            return Ok((session_id, queue));
+        }
+    }
+    let (session_id, queue) = provision_with_lifetime(state, ChronoDuration::days(3650)).await?;
+    sqlx::query("INSERT OR REPLACE INTO staff_workspaces (entra_oid, session_id, created_at) VALUES (?, ?, ?)")
+        .bind(oid).bind(&session_id).bind(state.now().to_rfc3339()).execute(&state.pool).await.map_err(|_| ApiError::internal())?;
+    Ok((session_id, queue))
+}
+
+async fn provision_with_lifetime(
+    state: &AppState,
+    lifetime: ChronoDuration,
+) -> Result<(String, DemoQueue), ApiError> {
     let now = state.now();
     let session_id = Uuid::now_v7().to_string();
-    let expires_at = now + ChronoDuration::hours(24);
+    let expires_at = now + lifetime;
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
     sqlx::query("INSERT INTO demo_sessions (id, created_at, expires_at) VALUES (?, ?, ?)")
         .bind(&session_id)
@@ -633,7 +1007,7 @@ async fn provision(state: &AppState) -> Result<(String, DemoQueue), ApiError> {
             "Upload the signed allergen sheet",
             "Add the signed allergen sheet for the launch file.",
             now - ChronoDuration::days(1),
-            true,
+            false,
         ),
         (
             "approval",
@@ -647,21 +1021,27 @@ async fn provision(state: &AppState) -> Result<(String, DemoQueue), ApiError> {
             "Choose the launch photo crop",
             "Choose one crop for the launch announcement.",
             now + ChronoDuration::days(1),
-            true,
+            false,
         ),
         (
             "external_link",
             "Open the launch invoice",
             "Open the hosted invoice when it is ready.",
             now + ChronoDuration::days(3),
-            true,
+            false,
         ),
     ];
     let mut approval_id = String::new();
+    let mut choice_id = String::new();
+    let mut external_id = String::new();
     for (kind, title, instructions, due_at, preview_only) in actions {
         let id = Uuid::now_v7().to_string();
         if kind == "approval" {
             approval_id.clone_from(&id);
+        } else if kind == "choice" {
+            choice_id.clone_from(&id);
+        } else if kind == "external_link" {
+            external_id.clone_from(&id);
         }
         sqlx::query(
             "INSERT INTO demo_actions
@@ -680,6 +1060,24 @@ async fn provision(state: &AppState) -> Result<(String, DemoQueue), ApiError> {
         .await
         .map_err(|_| ApiError::internal())?;
     }
+    for (key, label, position) in [
+        ("wide", "Wide counter crop", 1_i64),
+        ("square", "Square pastry crop", 2_i64),
+        ("portrait", "Portrait storefront crop", 3_i64),
+    ] {
+        sqlx::query("INSERT INTO demo_action_options (action_id, option_key, label, position) VALUES (?, ?, ?, ?)")
+            .bind(&choice_id).bind(key).bind(label).bind(position)
+            .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
+    }
+    sqlx::query(
+        "INSERT INTO demo_external_links (action_id, url, destination_host) VALUES (?, ?, ?)",
+    )
+    .bind(&external_id)
+    .bind("https://example.com/")
+    .bind("example.com")
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| ApiError::internal())?;
     append_audit(
         &mut tx,
         &session_id,
@@ -705,7 +1103,7 @@ async fn provision(state: &AppState) -> Result<(String, DemoQueue), ApiError> {
     Ok((session_id, queue))
 }
 
-async fn load_queue(state: &AppState, session_id: &str) -> Result<DemoQueue, ApiError> {
+pub(crate) async fn load_queue(state: &AppState, session_id: &str) -> Result<DemoQueue, ApiError> {
     let expires_at: String =
         sqlx::query_scalar("SELECT expires_at FROM demo_sessions WHERE id = ?")
             .bind(session_id)
@@ -971,7 +1369,7 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
         })
 }
 
-fn demo_cookie(id: &str, headers: &HeaderMap, max_age: u64) -> String {
+pub(crate) fn demo_cookie(id: &str, headers: &HeaderMap, max_age: u64) -> String {
     cookie(DEMO_COOKIE, id, headers, max_age)
 }
 

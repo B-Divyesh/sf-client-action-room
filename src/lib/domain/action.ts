@@ -18,7 +18,7 @@ export interface AuditEvent {
   action_id: string | null;
   event_name: string;
   actor_label: string;
-  decision: 'approved' | 'changes_requested' | null;
+  decision: string | null;
   occurred_at: string;
 }
 
@@ -50,6 +50,17 @@ export interface ClientAction {
   link_expires_at: string;
   action: DemoAction;
   submission: Submission | null;
+  choices: { key: string; label: string }[];
+  external_url: string | null;
+  destination_host: string | null;
+}
+
+export interface Completion {
+  kind: ActionKind;
+  actor_label: string;
+  detail: string;
+  occurred_at: string;
+  destination_url: string | null;
 }
 
 export function displayStatus(action: DemoAction, now = new Date()): DisplayStatus {
@@ -92,5 +103,10 @@ export function formatEventName(event: AuditEvent): string {
   if (event.event_name === 'client_decision_recorded') {
     return event.decision === 'approved' ? 'Approval recorded' : 'Changes requested';
   }
+  if (event.event_name === 'client_choice_recorded') return 'Choice recorded';
+  if (event.event_name === 'client_file_scanned') return 'File received and scanned';
+  if (event.event_name === 'external_link_opened') return 'External link opened';
+  if (event.event_name === 'reminder_scheduled') return 'Reminder scheduled';
+  if (event.event_name.endsWith('_link_issued')) return 'Client link issued';
   return 'Action updated';
 }

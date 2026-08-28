@@ -4,7 +4,7 @@ export interface RouteMeta {
   canonicalPath: string;
 }
 
-export type RouteName = 'home' | 'demo' | 'client' | 'privacy' | 'terms' | 'not-found';
+export type RouteName = 'home' | 'demo' | 'client' | 'workspace' | 'auth-callback' | 'privacy' | 'terms' | 'not-found';
 
 export const routeMeta: Record<RouteName, RouteMeta> = {
   home: {
@@ -21,6 +21,16 @@ export const routeMeta: Record<RouteName, RouteMeta> = {
     title: 'Client request — Client Action Room',
     description: 'Review one request and record your answer without creating an account.',
     canonicalPath: '/client',
+  },
+  workspace: {
+    title: 'Workspace — Client Action Room',
+    description: 'Open your signed-in Client Action Room workspace.',
+    canonicalPath: '/workspace',
+  },
+  'auth-callback': {
+    title: 'Signing in — Client Action Room',
+    description: 'Finish signing in to Client Action Room.',
+    canonicalPath: '/auth/callback',
   },
   privacy: {
     title: 'Privacy — Client Action Room',
@@ -44,6 +54,8 @@ export function resolveRoute(pathname: string, search = ''): RouteName {
   if (pathname === '/') return 'home';
   if (pathname === '/demo') return 'demo';
   if (pathname === '/client') return 'client';
+  if (pathname === '/workspace') return 'workspace';
+  if (pathname === '/auth/callback') return 'auth-callback';
   if (pathname === '/privacy') return 'privacy';
   if (pathname === '/terms') return 'terms';
   return 'not-found';

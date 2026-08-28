@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod demo;
 pub mod state;
 
@@ -5,8 +6,8 @@ use std::time::Duration;
 
 use axum::{
     body::Body,
-    extract::{MatchedPath, Request, State},
-    http::{header, HeaderName, HeaderValue, StatusCode},
+    extract::{DefaultBodyLimit, MatchedPath, Request, State},
+    http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -30,6 +31,7 @@ pub fn app(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/api/v1/me", get(me))
         .route("/api/v1/demo/sessions", post(demo::create_session))
         .route("/api/v1/demo/session/ensure", post(demo::ensure_session))
         .route("/api/v1/demo/session", delete(demo::destroy_session))
@@ -50,7 +52,24 @@ pub fn app(state: AppState) -> Router {
             "/api/v1/client/actions/{id}/submissions",
             post(demo::submit_action),
         )
+        .route(
+            "/api/v1/client/actions/{id}/choice",
+            post(demo::submit_choice),
+        )
+        .route(
+            "/api/v1/client/actions/{id}/upload",
+            post(demo::upload_file),
+        )
+        .route(
+            "/api/v1/client/actions/{id}/visit",
+            post(demo::record_external_visit),
+        )
+        .route(
+            "/api/v1/demo/actions/{id}/reminder",
+            post(demo::schedule_reminder),
+        )
         .fallback_service(static_files)
+        .layer(DefaultBodyLimit::max(5 * 1024 * 1024 + 16 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             security_and_rate_limit,
@@ -63,6 +82,23 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         status: "ok",
         build_sha: state.build_sha,
     })
+}
+
+async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, demo::ApiError> {
+    let claims = state.auth.verify(&headers).await?;
+    let (session_id, _) = demo::provision_staff(&state, &claims.oid).await?;
+    let cookie = demo::demo_cookie(&session_id, &headers, 2_592_000);
+    let mut response = Json(serde_json::json!({
+        "id": claims.oid,
+        "name": claims.name,
+        "email": claims.email
+    }))
+    .into_response();
+    response.headers_mut().append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie).map_err(|_| demo::ApiError::internal())?,
+    );
+    Ok(response)
 }
 
 async fn security_and_rate_limit(
@@ -108,7 +144,7 @@ async fn security_and_rate_limit(
         .is_some_and(|value| value.starts_with("text/html"));
     let known_html_route = matches!(
         path.as_str(),
-        "/" | "/demo" | "/client" | "/privacy" | "/terms"
+        "/" | "/demo" | "/client" | "/workspace" | "/auth/callback" | "/privacy" | "/terms"
     );
     if response.status().is_success() && is_html && !known_html_route {
         *response.status_mut() = StatusCode::NOT_FOUND;
@@ -165,7 +201,7 @@ fn add_security_headers(headers: &mut axum::http::HeaderMap, path: &str) {
         ),
         (
             HeaderName::from_static("content-security-policy"),
-            "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'; upgrade-insecure-requests",
+            "default-src 'self'; base-uri 'none'; connect-src 'self' https://sociobotcustomers.ciamlogin.com; font-src 'self'; form-action 'self' https://sociobotcustomers.ciamlogin.com; frame-src https://sociobotcustomers.ciamlogin.com; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'; upgrade-insecure-requests",
         ),
         (
             HeaderName::from_static("strict-transport-security"),

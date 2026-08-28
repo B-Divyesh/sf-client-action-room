@@ -46,5 +46,37 @@
     "where": "landing fact, share-link panel, expired client state",
     "test": "npm run test:e2e -- --grep @claim:link-expiry",
     "sandbox": "fresh demo fixture with an expired token; attempt client read and direct submission; assert both deny content and the page asks for a new link"
+  },
+  {
+    "id": "secure-upload",
+    "milestone": "repair",
+    "claim": "A client PDF is type-checked, safety-scanned, and scoped",
+    "where": "landing, upload client action, README",
+    "test": "npm run test:e2e -- --grep @claim:secure-upload",
+    "sandbox": "fresh demo; publish only the upload action; assert an EICAR fixture is rejected, a PDF is accepted, and the clean result reaches the staff audit"
+  },
+  {
+    "id": "choice-flow",
+    "milestone": "repair",
+    "claim": "A client can choose one listed option through a scoped link",
+    "where": "landing, choice client action, README",
+    "test": "npm run test:e2e -- --grep @claim:choice-flow",
+    "sandbox": "fresh demo; publish the choice action; select the square crop; assert the exact option reaches the staff audit"
+  },
+  {
+    "id": "external-link",
+    "milestone": "repair",
+    "claim": "A client sees the destination before opening an HTTPS payment or booking link",
+    "where": "landing, external client action, README",
+    "test": "npm run test:e2e -- --grep @claim:external-link",
+    "sandbox": "fresh demo; publish the external action; assert the host is disclosed, the server returns only its configured HTTPS URL, and the audit records the open without claiming payment"
+  },
+  {
+    "id": "reminder-audit",
+    "milestone": "repair",
+    "claim": "Staff can schedule one reminder and see its audit record",
+    "where": "demo action controls, README",
+    "test": "npm run test:e2e -- --grep @claim:reminder-audit",
+    "sandbox": "fresh demo; schedule a reminder for the open approval; assert the server time and staff actor appear in the audit"
   }
 ]

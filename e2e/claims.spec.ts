@@ -125,6 +125,65 @@ test('@claim:link-expiry An expired client link cannot read or submit the reques
   await context.close();
 });
 
+async function openTypedAction(page: Page, context: BrowserContext, kind: 'upload' | 'choice' | 'external') {
+  await page.locator(`.action-slip[data-kind="${kind === 'external' ? 'external_link' : kind}"]`).getByRole('button', { name: `Open ${kind} request` }).click();
+  const href = await page.getByTestId('open-client-link').getAttribute('href');
+  const clientPage = await context.newPage();
+  await clientPage.goto(href!);
+  return clientPage;
+}
+
+test('@claim:secure-upload A client PDF is type-checked, safety-scanned, and scoped', async ({ browser }) => {
+  const { context, page } = await openDemo(browser);
+  const clientPage = await openTypedAction(page, context, 'upload');
+  await expect(clientPage.getByRole('heading', { level: 1 })).toHaveText('Upload the signed allergen sheet');
+  await clientPage.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
+    name: 'unsafe.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 EICAR test marker'),
+  });
+  await clientPage.getByRole('button', { name: 'Upload and scan file' }).click();
+  await expect(clientPage.getByRole('alert')).toContainText('safety scan rejected');
+  await clientPage.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
+    name: 'signed-allergen-sheet.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF'),
+  });
+  await clientPage.getByRole('button', { name: 'Upload and scan file' }).click();
+  await expect(clientPage.getByTestId('client-completion')).toContainText('File received and scanned');
+  await page.reload();
+  await expect(page.locator('[data-event="client_file_scanned"]')).toContainText('Clean PDF');
+  await context.close();
+});
+
+test('@claim:choice-flow A client can choose one listed option through a scoped link', async ({ browser }) => {
+  const { context, page } = await openDemo(browser);
+  const clientPage = await openTypedAction(page, context, 'choice');
+  await clientPage.getByLabel('Square pastry crop').check();
+  await clientPage.getByRole('button', { name: 'Record my choice' }).click();
+  await expect(clientPage.getByTestId('client-completion')).toContainText('Square pastry crop');
+  await page.reload();
+  await expect(page.locator('[data-event="client_choice_recorded"]')).toContainText('Square pastry crop');
+  await context.close();
+});
+
+test('@claim:external-link A client sees the destination before opening an HTTPS payment or booking link', async ({ browser }) => {
+  const { context, page } = await openDemo(browser);
+  const clientPage = await openTypedAction(page, context, 'external');
+  await expect(clientPage.getByText('The destination is')).toContainText('example.com');
+  await clientPage.getByRole('button', { name: 'Open example.com' }).click();
+  const outbound = clientPage.getByRole('link', { name: 'Continue to example.com' });
+  await expect(outbound).toHaveAttribute('href', 'https://example.com/');
+  await page.reload();
+  await expect(page.locator('[data-event="external_link_opened"]')).toContainText('example.com');
+  await context.close();
+});
+
+test('@claim:reminder-audit Staff can schedule one reminder and see its audit record', async ({ browser }) => {
+  const { context, page } = await openDemo(browser);
+  const approval = page.locator('.action-slip[data-kind="approval"]');
+  await approval.getByRole('button', { name: 'Schedule reminder' }).click();
+  await expect(page.getByRole('status')).toContainText('Reminder scheduled');
+  await expect(page.locator('[data-event="reminder_scheduled"]')).toContainText('Theo Grant');
+  await context.close();
+});
+
 test('mobile, keyboard, routing, accessibility, and request privacy smoke', async ({ browser }) => {
   const context = await freshContext(browser, true);
   const page = await context.newPage();
@@ -159,5 +218,23 @@ test('mobile, keyboard, routing, accessibility, and request privacy smoke', asyn
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('This record is not in the archive');
   await page.goBack();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('How Client Action Room handles data');
+  await context.close();
+});
+
+test('staff workspace uses the CIAM boundary and remains keyboard accessible', async ({ browser }) => {
+  const context = await freshContext(browser, true);
+  const page = await context.newPage();
+  await page.goto('/workspace');
+  await expect(page).toHaveTitle('Workspace — Client Action Room');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Open your firm workspace');
+  const signIn = page.getByRole('button', { name: 'Sign in with Sociobot' });
+  await signIn.focus();
+  await expect(signIn).toBeFocused();
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations.filter(({ impact }) => impact === 'serious' || impact === 'critical')).toEqual([]);
+
+  const unauthorized = await context.request.get('/api/v1/me');
+  expect(unauthorized.status()).toBe(401);
+  expect(unauthorized.headers()['www-authenticate']).toBe('Bearer');
   await context.close();
 });

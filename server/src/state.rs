@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::auth::AuthService;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
@@ -19,6 +20,7 @@ pub struct AppState {
     pub limiter: RateLimiter,
     pub fixed_now: Option<DateTime<Utc>>,
     pub dist_dir: PathBuf,
+    pub auth: AuthService,
 }
 
 impl AppState {
@@ -72,6 +74,7 @@ impl AppState {
             limiter: RateLimiter::default(),
             fixed_now,
             dist_dir,
+            auth: AuthService::from_env(),
         }
     }
 

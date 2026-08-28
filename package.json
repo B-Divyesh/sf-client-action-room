@@ -17,6 +17,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@azure/msal-browser": "^4.25.0",
     "svelte": "5.56.10"
   },
   "devDependencies": {

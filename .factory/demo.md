@@ -1,11 +1,11 @@
 # Demo sandbox contract
 
-Status: **planned for M1; not implemented in the planning scaffold**
+Status: **implemented in M1**
 
 - Entry: `https://client-action-room.sociobot.in/demo` and `https://client-action-room.sociobot.in/?demo=1`
 - Local entry after M1: `http://localhost:5173/demo`
 - Lifetime: anonymous backend session, hard expiry at 24 hours
-- Namespace: a random `demo_session` ID in a dedicated demo repository/table or memory store; never an organization ID
+- Namespace: a random `demo_session` ID in dedicated SQLite demo tables; never an organization ID
 - Browser state: demo-only secure cookie and optional keys prefixed `demo:client-action-room:`; never `sb_license:*`, MSAL, or real app storage
 - Banner: `Demo — sample data, nothing is saved`, with `Reset demo` and `Start for real`
 - Reset: destroy the current namespace, provision a fresh deterministic seed, and keep the user on `/demo`
@@ -39,4 +39,4 @@ Preview-only actions must say which milestone adds interaction. They may demonst
 - Purge runs at least hourly and deletes demo rows/objects no later than 24 hours.
 - Rate limits apply by IP and demo session. Reset cannot be used to bypass the IP allowance.
 
-M1 implements the six tests in `.factory/claims.json` from fresh browser contexts using only this entry and seed. Until then, README and the placeholder must say the demo is planned, not available.
+The six tests in `.factory/claims.json` run from fresh browser contexts using only this entry and seed. Their fixed clock is `2026-08-28T14:00:00Z`; production derives the same relative deadlines from the live server clock.

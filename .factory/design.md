@@ -1,7 +1,7 @@
 # Client Action Room visual thesis
 
 - Direction: **municipal archive window**
-- Status: design contract approved for M1; no production artwork has been created
+- Status: **implemented for M1**
 - Last updated: 2026-08-28
 
 ## Thesis
@@ -163,12 +163,14 @@ Review raster output for unintended text, seals, civic insignia, duplicated tabs
 | Asset | Status | Source / author | License | Notes |
 |---|---|---|---|---|
 | Design tokens | Created in planner scaffold | Param Factory / Codex, 2026-08-28 | Repository MIT | `src/styles/tokens.css` |
-| Hero/service-window scene | Planned for M1 | Hand-made SVG by M1 builder, or factory image generator using prompt above | Repository MIT / factory-owned generated output | Record exact method, prompt/model if generated, checksum, and review here |
-| Status glyphs | Planned for M1 | Hand-made inline SVG by M1 builder | Repository MIT | One geometric family; no icon package |
-| Newsreader subset | Planned for M1 | Official upstream release | SIL OFL 1.1 | Record URL/version/checksum |
-| Public Sans subset | Planned for M1 | Official upstream release | SIL OFL 1.1 | Record URL/version/checksum |
+| Hero/service-window scene | Shipped in M1 | Hand-authored SVG by Param Factory, 2026-08-28 | Repository MIT | `public/archive-window.svg`; no generated model; SHA-256 `328fd637ffd3e1e191b1cddda04b155a757d75fece4adfc00d8b0321eada7f2b`; reviewed at 390/1440 with no text, seals, brands, or seams |
+| Social card | Shipped in M1 | Hand-authored SVG composition by Param Factory, with PNG export | Repository MIT | `social-card.svg` SHA-256 `a44c112983198464a16e5401763252e580f9ad7aa31f7f6b34bcb50b86186e4a`; `social-card.png` SHA-256 `46ad5865eb36a2eecd220b3eff6d1c858e3f7adc6a72c7d164d805b949d4ff6c` |
+| Favicon/touch icon | Shipped in M1 | Hand-authored SVG by Param Factory; CairoSVG PNG export | Repository MIT | SVG SHA-256 `8767004830a90313deccc9e5465b04179c02c7f06776ef501c7af005499dc56b`; PNG SHA-256 `dc7b74ab5ceac7321525e1a18a6c0ec918086b73736b1643ecec6ac61261a017` |
+| Status glyphs | Shipped in M1 | Hand-made CSS geometry by Param Factory | Repository MIT | One circle/half-disc/triangle/square family; no icon package |
+| Newsreader subset | Shipped in M1 | Google Fonts repository commit `ade3d1533e06b2b1462ffcde8e08b129627ca360`; static 600/48 instance, Latin subset | SIL OFL 1.1 | Source `ofl/newsreader/Newsreader[opsz,wght].ttf`; `fonttools varLib.instancer`, then `pyftsubset`; WOFF2 SHA-256 `6891a63ea1552aaa1ce8439d9269a24acd4d49ddf812b3cedb60fc14363e1fbf` |
+| Public Sans subset | Shipped in M1 | USWDS Public Sans repository commit `bae8aade44a1c1a2fdfeaabbfd6b6710b111a3a6`; variable Latin subset | SIL OFL 1.1 | Source `fonts/variable/PublicSans[wght].ttf`; `pyftsubset`; WOFF2 SHA-256 `9dfb099087354fd750c2dd9d7364e57284ee349986b2b2a9af60518523cca0d3` |
 
-No production image, icon, or font asset exists in the planning scaffold. That is intentional: the work order forbids building the product. M1 may not claim asset completion until this register has real source and checksum data. If generated imagery ships, disclose it in the site footer/about surface.
+All M1 artwork is hand-authored. No generated imagery, stock media, external icon package, or runtime CDN ships.
 
 ## Component system
 

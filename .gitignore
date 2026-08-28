@@ -1,6 +1,14 @@
 node_modules/
 dist/
 target/
+.data-*/
+playwright-report/
+test-results/
+.factory/evidence/*
+.factory/lighthouse-m1.json
+!.factory/evidence/screenshots/
+.factory/evidence/screenshots/*
+!.factory/evidence/screenshots/*.png
 server/target/
 playwright-report/
 test-results/

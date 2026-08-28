@@ -1,36 +1,61 @@
 # Client Action Room
 
-Client Action Room is a planned action inbox for small agencies and service firms that chase client approvals, files, choices, and external payment or booking links.
+Give each client one short, deadline-based action list.
 
-The repository is at the planning-scaffold stage. It contains the venture contract, visual system, M1 claims, Svelte tooling, a health-only Rust API, and CI. It does **not** contain the client workflow or a usable demo yet. M1 will replace the placeholder page with the first complete demo flow.
+Client Action Room is for small agencies and service firms that chase approvals across email. M1 ships a complete, account-free approval demo. Staff issue a scoped link, a client answers, and the audit record shows the result.
 
-Read:
+Try the deployed sample at <https://client-action-room.sociobot.in/demo>.
 
-- [`.factory/plan.md`](.factory/plan.md) for the PRD, evidence, architecture, milestones, tests, and risks.
-- [`.factory/design.md`](.factory/design.md) for the municipal archive window visual system.
-- [`.factory/claims.json`](.factory/claims.json) for the M1 claims that its sandbox tests must prove.
-- [`.factory/demo.md`](.factory/demo.md) for the planned isolated sample data.
+## What M1 proves
+
+- Try a ready client action room in one click.
+- Demo changes are sample-only and resettable.
+- A client can approve a request without creating an account.
+- Open requests are ordered by deadline.
+- An approval records the decision, actor label, and server time.
+- An expired client link cannot read or submit the request.
+
+The upload, choice, and external-link rows are labelled previews. Real firm accounts, CIAM sign-in, file handling, and monthly billing remain in their contracted later milestones.
+
+## Demo boundary
+
+The sample uses Northline Studio and the Alder Street Bakery launch. `/demo` creates a random server-side namespace that expires within 24 hours. Reset destroys that namespace and creates the same four sample actions again. Client link secrets stay in URL fragments and are exchanged for scoped HttpOnly cookies; SQLite stores only SHA-256 token digests.
+
+The demo router cannot access future organization, billing, email, upload, or AI services. See [`.factory/demo.md`](.factory/demo.md) for its exact data and isolation rules.
 
 ## Stack
 
-- Svelte 5 + Vite + strict TypeScript for the web application.
-- Rust 2021 + axum for the API; PostgreSQL is planned for shared production data.
-- Sociobot Entra CIAM for staff identity and Sociobot billing for Dodo-backed recurring subscriptions. The product will never handle passwords or call Dodo directly.
+- Svelte 5, Vite, and strict TypeScript for the browser.
+- Rust 2021, axum, and sqlx with SQLite for the M1 API.
+- Reversible migrations under [`server/migrations`](server/migrations).
+- A non-root multi-stage container that serves the API and built web application on `PORT`.
 
-## Develop
+M2 will use the shared Sociobot Entra CIAM tenant for staff and the Sociobot recurring billing service for Dodo-backed subscriptions. This repository never handles passwords or calls Dodo directly.
 
-Requirements: Node 22+, npm, and the stable Rust toolchain.
+## Run locally
+
+Requirements: Node 22+, npm, and stable Rust.
 
 ```sh
 npm ci
-npm run dev          # web placeholder on http://localhost:5173
-npm run dev:api      # health scaffold on http://localhost:8080/health
-npm run check
-npm test
-npm run build        # web output in dist/; release API in server/target/
+npm run build:web
+DATA_DIR=.data-local DIST_DIR=dist PORT=8080 npm run dev:api
 ```
 
-The Playwright version is pinned to 1.58.2 for the worker image. M1 adds browser specs and runs them through `npm run test:e2e`.
+Open <http://localhost:8080/demo>. `PORT` is the only deployment variable required. `DATA_DIR`, `DATABASE_URL`, `DIST_DIR`, and `DEMO_FIXED_NOW` are optional overrides.
+
+For frontend-only work, run `npm run dev`; Vite does not proxy the Rust API.
+
+## Test and build
+
+```sh
+npm run check
+npm test
+npm run test:e2e
+npm run build
+```
+
+The Playwright suite starts the built application and pins the browser package to 1.58.2. Each public claim has one test tagged `@claim:<id>` in [`e2e/claims.spec.ts`](e2e/claims.spec.ts).
 
 ## Container
 
@@ -40,15 +65,22 @@ docker run --rm -p 8080:8080 client-action-room
 curl http://localhost:8080/health
 ```
 
-The current container serves only `/health`; serving the built web shell is M1 scope. It starts with `PORT` alone and runs as a non-root user.
+The image runs as a non-root user, creates its SQLite file under `/data`, applies migrations at startup, and serves `/health` with the build SHA.
 
-## Demo and deployment
+## Deploy
 
-The planned demo entry is `/demo` or `?demo=1`. It is not implemented in this planning work order. Production will ship at <https://client-action-room.sociobot.in>; the factory owns deployment, DNS, identity registration, and recurring-price registration.
+The factory deploys the container to Azure Container Apps and owns DNS, CIAM redirect registration, secrets, and recurring-price registration. Do not deploy this repository as a static-only site because the isolated demo depends on its API.
 
-## Privacy and terms
+## Privacy and legal
 
-The scaffold stores no customer data and sends no analytics. M1 adds `/privacy` and `/terms` before any customer workflow. The product plan requires tenant isolation, scoped expiring client links, quarantined uploads, audit records, export/delete, and region-bound storage.
+The M1 demo has no analytics or third-party runtime requests. Read `/privacy` and `/terms` in the application. Approval records capture intent but are not regulated electronic signatures.
+
+## Product documents
+
+- [Venture plan](.factory/plan.md)
+- [Visual system](.factory/design.md)
+- [Claims](.factory/claims.json)
+- [M1 handoff](.factory/handoff-m1.md)
 
 ## License
 

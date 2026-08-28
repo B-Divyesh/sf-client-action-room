@@ -1,0 +1,36 @@
+{
+  "slug": "client-action-room",
+  "title": "Client Action Room",
+  "territory": "utilities",
+  "user": "Small agencies and professional-service firms that need clients to complete a few time-sensitive requests—approve, upload, choose, or pay—without exposing a full project-management system.",
+  "evidence": [
+    {
+      "url": "https://hn.algolia.com/api/v1/items/47217750",
+      "date": "2026-03-02",
+      "quote_or_summary": "A solo developer says HoneyBook was expensive and fragmented tools forced them to build a white-label portal for file sharing, project tracking, and invoices; a commenter notes firms want zero operational overhead."
+    },
+    {
+      "url": "https://hn.algolia.com/api/v1/items/48408917",
+      "date": "2026-06-05",
+      "quote_or_summary": "A five-year freelancer reports multi-client work became messy across tasks, documents, knowledge, and several client platforms; clients liked having one secure portal."
+    },
+    {
+      "url": "https://github.com/odoo/odoo/issues/192439",
+      "date": "2025-01-06",
+      "quote_or_summary": "This 27-reaction Odoo request says client portal blocks are hard-coded; repeatedly building custom modules just to hide, filter, rename, or tailor client data is costly and frustrating."
+    }
+  ],
+  "recurrence": "Two independent agency/freelancer implementations and a high-interest ERP request show the portal is repeatedly rebuilt because the essential client-facing actions are too rigid or bundled with large suites.",
+  "current_workaround": "Email links, Drive/Notion folders, Slack, invoices, and project trackers; some self-host a portal or buy HoneyBook/Worksuite-class platforms.",
+  "incumbents_and_gap": "HoneyBook, Clientjoy, Odoo, and project-management tools provide broad portals. Their gap is a fast, configurable action inbox for an external client, with no client account required for low-risk tasks.",
+  "smallest_useful_product": "Branded portal links with a deadline-based action queue, secure uploads, approval forms, payment/booking links, reminders, and a staff audit trail. Non-goals: task boards, CRM replacement, document editing, or general chat.",
+  "success_measure": "In pilots, 60% of requested client actions complete within 72 hours and agencies reduce follow-up emails per action by at least 40%.",
+  "artifact_class": "web-with-backend",
+  "monetization": "subscription — $49/month for five client workspaces, because firms repeatedly chase actions and need branded, retained records.",
+  "constraints": "Role-scoped links, expiring uploads, malware scanning, audit records, data-residency controls, and clear e-signature limitations unless regulated signing is added later.",
+  "est_build_effort": "M",
+  "scale": "venture",
+  "why_distinct": "The primary object is an accountable external action, not a generic portal, CRM, or project board.",
+  "confidence": 4,
+  "state": "RESEARCHED"
+}

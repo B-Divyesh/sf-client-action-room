@@ -14,7 +14,10 @@ use axum::{
     Json, Router,
 };
 use serde::Serialize;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::{
+    compression::CompressionLayer,
+    services::{ServeDir, ServeFile},
+};
 use tracing::info;
 
 use crate::state::AppState;
@@ -69,6 +72,7 @@ pub fn app(state: AppState) -> Router {
             post(demo::schedule_reminder),
         )
         .fallback_service(static_files)
+        .layer(CompressionLayer::new())
         .layer(DefaultBodyLimit::max(5 * 1024 * 1024 + 16 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -135,8 +139,15 @@ async fn security_and_rate_limit(
     }
 
     let method = request.method().clone();
+    let should_persist = method != axum::http::Method::GET && path.starts_with("/api/");
     let started = std::time::Instant::now();
     let mut response = next.run(request).await;
+    if should_persist && response.status().is_success() {
+        if let Err(error) = state.persist_snapshot().await {
+            tracing::error!(error = %error, "durable database snapshot failed");
+            *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+        }
+    }
     let is_html = response
         .headers()
         .get(header::CONTENT_TYPE)
@@ -215,7 +226,7 @@ fn add_security_headers(headers: &mut axum::http::HeaderMap, path: &str) {
         header::CACHE_CONTROL,
         if path.starts_with("/api/") || path == "/client" {
             HeaderValue::from_static("no-store")
-        } else if path.starts_with("/assets/") {
+        } else if path.starts_with("/assets/") || path.starts_with("/fonts/") {
             HeaderValue::from_static("public, max-age=31536000, immutable")
         } else {
             HeaderValue::from_static("public, max-age=300")

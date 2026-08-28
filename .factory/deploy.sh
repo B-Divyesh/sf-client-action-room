@@ -19,18 +19,22 @@ az containerapp env storage set \
   --output none
 
 image=$(az containerapp show --resource-group sociobot --name sf-client-action-room --query 'properties.template.containers[0].image' --output tsv)
-revision_suffix="repair-$(git -C "$repo_dir" rev-parse --short=7 HEAD)"
+deploy_yaml=$(mktemp)
+trap 'rm -f "$deploy_yaml"' EXIT
+sed "s|IMAGE_PLACEHOLDER|$image|" "$repo_dir/.factory/containerapp-volume.yaml" > "$deploy_yaml"
 az containerapp update \
   --resource-group sociobot \
   --name sf-client-action-room \
-  --image "$image" \
-  --set-env-vars PORT=8080 DATA_DIR=/data \
-  --min-replicas 1 \
-  --max-replicas 1 \
-  --revision-suffix "$revision_suffix" \
-  --yaml "$repo_dir/.factory/containerapp-volume.yaml" \
+  --yaml "$deploy_yaml" \
   --output none
 
 actual=$(az containerapp show --resource-group sociobot --name sf-client-action-room \
   --query 'properties.template.scale.maxReplicas' --output tsv)
 test "$actual" = "1"
+
+latest=$(az containerapp show --resource-group sociobot --name sf-client-action-room --query 'properties.latestRevisionName' --output tsv)
+while IFS= read -r revision; do
+  if [ -n "$revision" ] && [ "$revision" != "$latest" ]; then
+    az containerapp revision deactivate --resource-group sociobot --name sf-client-action-room --revision "$revision" --output none
+  fi
+done < <(az containerapp revision list --resource-group sociobot --name sf-client-action-room --query '[?properties.active].name' --output tsv)

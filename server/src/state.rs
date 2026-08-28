@@ -21,11 +21,13 @@ pub struct AppState {
     pub fixed_now: Option<DateTime<Utc>>,
     pub dist_dir: PathBuf,
     pub auth: AuthService,
+    database_path: Option<PathBuf>,
+    persist_path: Option<PathBuf>,
 }
 
 impl AppState {
     pub async fn from_env(build_sha: impl Into<String>) -> Result<Self> {
-        let (database_url, source) = database_url()?;
+        let (database_url, source, database_path, persist_path) = database_url()?;
         let options = SqliteConnectOptions::from_str(&database_url)
             .context("DATABASE_URL must be a valid SQLite URL")?
             .create_if_missing(true)
@@ -59,7 +61,11 @@ impl AppState {
             "runtime configuration loaded; no secret values logged"
         );
 
-        Ok(Self::new(build_sha, pool, fixed_now, dist_dir))
+        let mut state = Self::new(build_sha, pool, fixed_now, dist_dir);
+        state.database_path = database_path;
+        state.persist_path = persist_path;
+        state.persist_snapshot().await?;
+        Ok(state)
     }
 
     pub fn new(
@@ -68,6 +74,17 @@ impl AppState {
         fixed_now: Option<DateTime<Utc>>,
         dist_dir: PathBuf,
     ) -> Self {
+        Self::new_with_persistence(build_sha, pool, fixed_now, dist_dir, None, None)
+    }
+
+    pub fn new_with_persistence(
+        build_sha: impl Into<String>,
+        pool: SqlitePool,
+        fixed_now: Option<DateTime<Utc>>,
+        dist_dir: PathBuf,
+        database_path: Option<PathBuf>,
+        persist_path: Option<PathBuf>,
+    ) -> Self {
         Self {
             build_sha: build_sha.into(),
             pool,
@@ -75,6 +92,8 @@ impl AppState {
             fixed_now,
             dist_dir,
             auth: AuthService::from_env(),
+            database_path,
+            persist_path,
         }
     }
 
@@ -89,11 +108,25 @@ impl AppState {
             .await?;
         Ok(result.rows_affected())
     }
+
+    pub async fn persist_snapshot(&self) -> Result<()> {
+        let (Some(database), Some(persist)) = (&self.database_path, &self.persist_path) else {
+            return Ok(());
+        };
+        sqlx::query("PRAGMA wal_checkpoint(FULL)")
+            .execute(&self.pool)
+            .await
+            .ok();
+        let temporary = persist.with_extension("sqlite3.next");
+        fs::copy(database, &temporary).context("database snapshot must copy")?;
+        fs::rename(&temporary, persist).context("database snapshot must publish")?;
+        Ok(())
+    }
 }
 
-fn database_url() -> Result<(String, &'static str)> {
+fn database_url() -> Result<(String, &'static str, Option<PathBuf>, Option<PathBuf>)> {
     if let Ok(value) = env::var("DATABASE_URL") {
-        return Ok((value, "supplied"));
+        return Ok((value, "supplied", None, None));
     }
 
     let preferred = env::var_os("DATA_DIR")
@@ -101,7 +134,23 @@ fn database_url() -> Result<(String, &'static str)> {
         .unwrap_or_else(|| PathBuf::from("/data"));
     let directory = writable_directory(&preferred).unwrap_or_else(|| PathBuf::from("."));
     let database = directory.join("client-action-room.sqlite3");
-    Ok((sqlite_url(&database), "generated-default"))
+    let persist_path = env::var_os("PERSIST_DIR")
+        .map(PathBuf::from)
+        .map(|directory| {
+            let _ = fs::create_dir_all(&directory);
+            directory.join("client-action-room.sqlite3")
+        });
+    if let Some(persist) = &persist_path {
+        if persist.exists() && !database.exists() {
+            fs::copy(persist, &database).context("persistent database snapshot must restore")?;
+        }
+    }
+    Ok((
+        sqlite_url(&database),
+        "generated-default",
+        Some(database),
+        persist_path,
+    ))
 }
 
 fn writable_directory(path: &Path) -> Option<PathBuf> {

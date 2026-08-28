@@ -428,3 +428,43 @@ async fn session_survives_a_request_served_by_a_second_app_instance() {
         4
     );
 }
+
+#[tokio::test]
+async fn successful_mutation_can_be_snapshotted_and_restored() {
+    let directory = tempfile::tempdir().unwrap();
+    let live_path = directory.path().join("live.sqlite3");
+    let snapshot_path = directory.path().join("durable.sqlite3");
+    let url = format!("sqlite://{}?mode=rwc", live_path.display());
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .unwrap();
+    sqlx::migrate!().run(&pool).await.unwrap();
+    let state = AppState::new_with_persistence(
+        "snapshot",
+        pool,
+        Some(Utc.with_ymd_and_hms(2026, 8, 28, 14, 0, 0).unwrap()),
+        PathBuf::from("../dist"),
+        Some(live_path),
+        Some(snapshot_path.clone()),
+    );
+    let _ = client_action_room_api::demo::provision_staff(&state, "durable-oid")
+        .await
+        .unwrap();
+    state.persist_snapshot().await.unwrap();
+    assert!(snapshot_path.exists());
+
+    let restored_url = format!("sqlite://{}?mode=ro", snapshot_path.display());
+    let restored = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&restored_url)
+        .await
+        .unwrap();
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM staff_workspaces WHERE entra_oid = 'durable-oid'")
+            .fetch_one(&restored)
+            .await
+            .unwrap();
+    assert_eq!(count, 1);
+}

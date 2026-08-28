@@ -5,7 +5,6 @@
   import SiteFooter from './lib/components/SiteFooter.svelte';
   import StatusStamp from './lib/components/StatusStamp.svelte';
   import { api, ApiError } from './lib/api';
-  import { beginStaffSignIn, finishStaffSignIn, signOut, staffToken } from './lib/auth';
   import type { AccountInfo } from '@azure/msal-browser';
   import {
     displayStatus,
@@ -144,6 +143,7 @@
       // The next screen still explains the real-account boundary.
     }
     try {
+      const { beginStaffSignIn } = await import('./lib/auth');
       await beginStaffSignIn();
     } catch (caught) {
       busy = false;
@@ -155,6 +155,7 @@
   async function loadWorkspace() {
     loading = true;
     try {
+      const { finishStaffSignIn, staffToken } = await import('./lib/auth');
       staffAccount = await finishStaffSignIn();
       if (route === 'auth-callback') {
         navigate('/workspace');
@@ -172,7 +173,10 @@
   }
 
   async function leaveWorkspace() {
-    if (staffAccount) await signOut(staffAccount);
+    if (staffAccount) {
+      const { signOut } = await import('./lib/auth');
+      await signOut(staffAccount);
+    }
   }
 
   async function publish(action: DemoAction) {

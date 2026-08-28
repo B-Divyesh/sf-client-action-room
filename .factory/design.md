@@ -1,7 +1,7 @@
 # Client Action Room visual thesis
 
 - Direction: **municipal archive window**
-- Status: **implemented for M1**
+- Status: **implemented and retained through repair 1**
 - Last updated: 2026-08-28
 
 ## Thesis

@@ -1,11 +1,11 @@
 # Client Action Room venture plan
 
-Status: **planning complete; M1 not started**  
-Product: `client-action-room`  
-Artifact: web application with backend  
-Production URL: `https://client-action-room.sociobot.in`  
-Plan owner: Param Factory  
-Last updated: 2026-08-28
+- Status: **planning complete; M1 not started**
+- Product: `client-action-room`
+- Artifact: web application with backend
+- Production URL: `https://client-action-room.sociobot.in`
+- Plan owner: Param Factory
+- Last updated: 2026-08-28
 
 This document is the delivery contract. A milestone may be marked complete only when its routes, tests, claims, and definition of done all pass. Builders must read this plan, `.factory/design.md`, and every earlier milestone handoff before changing code.
 

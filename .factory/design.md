@@ -1,8 +1,8 @@
 # Client Action Room visual thesis
 
-Direction: **municipal archive window**  
-Status: design contract approved for M1; no production artwork has been created  
-Last updated: 2026-08-28
+- Direction: **municipal archive window**
+- Status: design contract approved for M1; no production artwork has been created
+- Last updated: 2026-08-28
 
 ## Thesis
 

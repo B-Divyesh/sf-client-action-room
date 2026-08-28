@@ -13,11 +13,11 @@ Status: **planned for M1; not implemented in the planning scaffold**
 
 ## Seed data
 
-Firm: **Northline Studio**  
-Client workspace: **Alder Street Bakery launch**  
-Staff owner: **Theo Grant**  
-Client actor: **Maya Chen**  
-Workspace time zone: **America/New_York**
+- Firm: **Northline Studio**
+- Client workspace: **Alder Street Bakery launch**
+- Staff owner: **Theo Grant**
+- Client actor: **Maya Chen**
+- Workspace time zone: **America/New_York**
 
 Use a fixed test clock in claim runs. Relative due dates are derived from seed time, never left stale in fixtures.
 

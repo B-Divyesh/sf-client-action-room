@@ -1,0 +1,13 @@
+.git
+.github
+.factory/evidence
+.data-*
+dist
+node_modules
+playwright-report
+server/target
+target
+test-results
+*.local
+.env
+.env.*

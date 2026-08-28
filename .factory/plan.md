@@ -1,6 +1,6 @@
 # Client Action Room venture plan
 
-- Status: **planning complete; M1 not started**
+- Status: **M1 built and deployed; independent review/polish pending**
 - Product: `client-action-room`
 - Artifact: web application with backend
 - Production URL: `https://client-action-room.sociobot.in`
@@ -408,13 +408,15 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 | Milestone | Status | Shippable outcome |
 |---|---|---|
-| M1 — Public site and approval demo | Planned | A stranger can open sample data, publish an approval, complete it as a client, and see the audit event. |
+| M1 — Public site and approval demo | Built and deployed; review pending | A stranger can open sample data, publish an approval, complete it as a client, and see the audit event. |
 | M2 — Accounts, persistence, and subscriptions | Planned | A firm can sign in, create persistent rooms/actions, and start a real monthly plan. |
 | M3 — Files, choices, and external links | Planned | Clients can complete the remaining action types with quarantined uploads and clear boundaries. |
 | M4 — Reminders, records, and operations | Planned | The service runs itself: reminders, audit/export/delete, retention, admin, metrics, and restore evidence. |
 | M5 — Growth and integrations | Planned | Firms can import/share templates and connect action outcomes without turning the product into a project suite. |
 
 ### M1 — Public site and approval demo
+
+**Status:** Built and deployed on 2026-08-28. Builder gates pass; independent review/polish must reach PASS before M2 starts.
 
 **User outcome:** without an account, a visitor can use realistic sample data to experience the smallest complete action loop.
 

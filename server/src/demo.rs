@@ -1006,7 +1006,10 @@ fn secure_attribute(headers: &HeaderMap) -> &'static str {
 }
 
 fn enforce_same_origin(headers: &HeaderMap) -> Result<(), ApiError> {
-    let Some(origin) = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()) else {
+    let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    else {
         return Ok(());
     };
     let host = headers

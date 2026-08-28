@@ -1,0 +1,50 @@
+[
+  {
+    "id": "demo-one-click",
+    "milestone": "M1",
+    "claim": "Try a ready client action room in one click",
+    "where": "landing primary action, README",
+    "test": "npm run test:e2e -- --grep @claim:demo-one-click",
+    "sandbox": "fresh browser context; open /; activate the one primary action; assert /demo has the seeded Northline Studio queue"
+  },
+  {
+    "id": "demo-reset",
+    "milestone": "M1",
+    "claim": "Demo changes are sample-only and resettable",
+    "where": "demo banner, landing privacy section, README",
+    "test": "npm run test:e2e -- --grep @claim:demo-reset",
+    "sandbox": "two fresh browser contexts; change and complete the sample approval in one; assert the other remains unchanged; reset the first and assert the exact seed returns"
+  },
+  {
+    "id": "client-no-account",
+    "milestone": "M1",
+    "claim": "A client can approve a request without creating an account",
+    "where": "landing fact, demo client window, README",
+    "test": "npm run test:e2e -- --grep @claim:client-no-account",
+    "sandbox": "fresh demo; publish the sample approval; open its client fragment link in a signed-out context; approve; assert completion without Entra navigation or account input"
+  },
+  {
+    "id": "deadline-order",
+    "milestone": "M1",
+    "claim": "Open requests are ordered by deadline",
+    "where": "landing live preview, demo deadline rail",
+    "test": "npm run test:e2e -- --grep @claim:deadline-order",
+    "sandbox": "fresh seeded demo with fixed clock; read all open action due times and assert ascending order with the overdue request first"
+  },
+  {
+    "id": "approval-audit",
+    "milestone": "M1",
+    "claim": "An approval records the decision, actor label, and server time",
+    "where": "demo completion result, audit ledger",
+    "test": "npm run test:e2e -- --grep @claim:approval-audit",
+    "sandbox": "fresh demo with fixed server clock; submit approval as Maya Chen; return to staff audit; assert decision, actor label, and exact server time"
+  },
+  {
+    "id": "link-expiry",
+    "milestone": "M1",
+    "claim": "An expired client link cannot read or submit the request",
+    "where": "landing fact, share-link panel, expired client state",
+    "test": "npm run test:e2e -- --grep @claim:link-expiry",
+    "sandbox": "fresh demo fixture with an expired token; attempt client read and direct submission; assert both deny content and the page asks for a new link"
+  }
+]

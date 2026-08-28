@@ -90,12 +90,19 @@ test('@claim:deadline-order Open requests are ordered by deadline', async ({ bro
 
 test('@claim:approval-audit An approval records the decision, actor label, and server time', async ({ browser }) => {
   const { context, page } = await openDemo(browser);
+  const submittedAfter = Date.now();
   await publishAndApprove(page, context);
   await page.reload();
   const event = page.locator('[data-event="client_decision_recorded"]');
   await expect(event).toContainText('Approval recorded');
   await expect(event).toContainText('Maya Chen · Approved');
-  await expect(event.locator('time')).toHaveAttribute('datetime', '2026-08-28T14:00:00+00:00');
+  const recordedAt = await event.locator('time').getAttribute('datetime');
+  if (process.env.PLAYWRIGHT_BASE_URL) {
+    expect(Date.parse(recordedAt!)).toBeGreaterThanOrEqual(submittedAfter - 1_000);
+    expect(Date.parse(recordedAt!)).toBeLessThanOrEqual(Date.now() + 1_000);
+  } else {
+    expect(recordedAt).toBe('2026-08-28T14:00:00+00:00');
+  }
   await context.close();
 });
 

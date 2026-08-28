@@ -118,7 +118,8 @@ impl AppState {
             .await
             .ok();
         let temporary = persist.with_extension("sqlite3.next");
-        fs::copy(database, &temporary).context("database snapshot must copy")?;
+        let bytes = fs::read(database).context("database snapshot must read")?;
+        fs::write(&temporary, bytes).context("database snapshot must write")?;
         fs::rename(&temporary, persist).context("database snapshot must publish")?;
         Ok(())
     }

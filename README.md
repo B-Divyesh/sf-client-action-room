@@ -13,19 +13,22 @@ Try the deployed sample at <https://client-action-room.sociobot.in/demo>.
 - A client can approve a request without creating an account.
 - Open requests are ordered by deadline.
 - An approval records the decision, actor label, and server time.
-- An expired client link cannot read or submit the request.
-- A client PDF is type-checked, safety-scanned, and scoped.
+- Client links last seven days, then cannot read or submit the request.
+- A client PDF is type-checked, malware-scanned, and scoped.
 - A client can choose one listed option through a scoped link.
 - A client sees the destination before opening an HTTPS payment or booking link.
 - Staff can schedule one reminder and see its audit record.
+- A firm starts with an empty, isolated workspace that persists.
+- Demo traffic stays on this site, data lasts at most 24 hours, and leaving deletes the room.
+- Staff workspace requests reject missing and invalid access tokens.
 
-The public sandbox runs all four action types without an account. Staff can use “Start for real” to sign in through the shared Sociobot Entra tenant and open an identity-isolated workspace.
+The public sandbox runs all four action types without an account. “Start for real” opens a signed-in, empty firm workspace for durable approval requests. File, choice, external-link, billing, and email delivery remain later firm-workspace milestones.
 
 ## Demo boundary
 
-The sample uses Northline Studio and the Alder Street Bakery launch. `/demo` creates a random server-side namespace that expires within 24 hours. Reset destroys that namespace and creates the same four sample actions again. Client link secrets stay in URL fragments and are exchanged for scoped HttpOnly cookies; SQLite stores only SHA-256 token digests.
+The sample uses Northline Studio and the Alder Street Bakery launch. `/demo` creates a random server-side workspace that expires within 24 hours. Reset destroys it and creates the same four sample actions again. Sample activity never moves into a signed-in firm workspace.
 
-The demo router cannot access organization, billing, email, or AI services. Sample PDFs stay inside the demo namespace and expire with it. See [`.factory/demo.md`](.factory/demo.md) for its exact data and isolation rules.
+Client link secrets travel in URL fragments. The browser removes the fragment after exchange. See [`.factory/demo.md`](.factory/demo.md) for the exact sample and isolation rules.
 
 ## Stack
 
@@ -33,12 +36,13 @@ The demo router cannot access organization, billing, email, or AI services. Samp
 - Rust 2021, axum, and sqlx with SQLite for the API.
 - Reversible migrations under [`server/migrations`](server/migrations).
 - A non-root multi-stage container that serves the API and built web application on `PORT`.
+- ClamAV with build-time signatures. The server records an upload only after a clean scan result.
 
-Staff authentication uses MSAL redirect with PKCE and session storage. The API validates RS256 tokens against discovered issuer and JWKS values, including audience and tenant. This repository never handles passwords, embeds provider secrets, or calls Dodo directly.
+Staff authentication uses the shared Sociobot Microsoft Entra tenant. Staff access rejects missing or invalid tokens.
 
 ## Run locally
 
-Requirements: Node 22+, npm, and stable Rust.
+Requirements: Node 22+, npm, stable Rust, and ClamAV for a real upload scan.
 
 ```sh
 npm ci
@@ -46,7 +50,7 @@ npm run build:web
 DATA_DIR=.data-local DIST_DIR=dist PORT=8080 npm run dev:api
 ```
 
-Open <http://localhost:8080/demo>. `PORT` is the only deployment variable required. `DATA_DIR`, `DATABASE_URL`, `DIST_DIR`, `DEMO_FIXED_NOW`, and the documented Entra overrides are optional.
+Open <http://localhost:8080/demo>. `PORT` is the only deployment variable required. The container includes ClamAV. Local browser tests use a recorded scanner fixture.
 
 For frontend-only work, run `npm run dev`; Vite does not proxy the Rust API.
 
@@ -79,11 +83,11 @@ The image runs as a non-root user, creates its SQLite file under `/data`, applie
 
 ## Deploy
 
-The factory deploys the container to Azure Container Apps and owns DNS, CIAM redirect registration, secrets, and recurring-price registration. Do not deploy this repository as a static-only site because the isolated demo depends on its API.
+The factory deploys one replica to Azure Container Apps with SQLite on `/data`. It owns DNS, CIAM redirect registration, and recurring-price registration. Do not deploy this as a static-only site.
 
 ## Privacy and legal
 
-The demo has no analytics. Only a client-chosen external action can leave the site. Read `/privacy` and `/terms` in the application. Approval records capture intent but are not regulated electronic signatures.
+Demo traffic stays on this site. Only a client-chosen external action can open another site. Read `/privacy` and `/terms`. Approval records are not regulated electronic signatures.
 
 ## Product documents
 

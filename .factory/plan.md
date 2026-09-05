@@ -1,6 +1,6 @@
 # Client Action Room venture plan
 
-- Status: **M1 repaired; M2 identity boundary and M3/M4 demo workflows added in repair 1**
+- Status: **M1 repair 2 complete in source; deployment verification pending**
 - Product: `client-action-room`
 - Artifact: web application with backend
 - Production URL: `https://client-action-room.sociobot.in`
@@ -220,7 +220,7 @@ All IDs are UUIDv7 or another sortable, non-guessable server-generated ID. Times
 | `audit_event` | organization, workspace, action, actor kind/id, event name, timestamp, redacted metadata, hash-chain predecessor | Append-only; included in export |
 | `reminder` | action, channel, scheduled/sent/suppressed timestamps, reason | Organization |
 | `outbox_job` | kind, tenant, encrypted/redacted payload, attempts, available/locked time | Operational; delete after 30 days |
-| `demo_session` | random session digest, seed version, created/expires time | Isolated namespace; hard-delete within 24 hours |
+| `workspace` | namespace (`demo` or `real`), organization, labels, created/expires time | Demo rows hard-delete within 24 hours; real rows persist |
 | `idempotency_record` | tenant/scope, key digest, request hash, response code/body, expiry | 24 hours unless the operation needs longer |
 
 Audit events are application-append-only. Database permissions deny updates/deletes to the runtime path except the explicit whole-tenant erasure job. Hash chaining detects accidental mutation but is not advertised as tamper-proof.
@@ -391,7 +391,7 @@ Header: wordmark to home; at most Demo, Pricing, Sign in, and Privacy; skip link
 | `/client` after fragment exchange | 1 | `Client request — Client Action Room` | Dynamic action job, never the product name alone |
 | `/privacy` | 1 | `Privacy — Client Action Room` | `How Client Action Room handles data` |
 | `/terms` | 1 | `Terms — Client Action Room` | `Terms for Client Action Room` |
-| `/404` | 1 | `Page not found — Client Action Room` | `This record is not in the archive` |
+| `/404` | 1 | `Page not found — Client Action Room` | `We could not find this page` |
 | `/auth/callback` | 2 | `Signing in — Client Action Room` | `Finishing sign-in` |
 | `/onboarding` | 2 | `Set up your firm — Client Action Room` | `Set up your firm` |
 | `/app` | 2 | `Action queue — Client Action Room` | `Client action queue` |
@@ -408,15 +408,15 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 | Milestone | Status | Shippable outcome |
 |---|---|---|
-| M1 — Public site and approval demo | Repaired and release-tested | A stranger can open sample data, publish an approval, complete it as a client, and see the audit event. |
-| M2 — Accounts, persistence, and subscriptions | Identity and persistent workspace delivered; billing registration pending | A firm can sign in and return to an isolated workspace. |
-| M3 — Files, choices, and external links | Demo workflows delivered | Clients can complete each action type through a scoped link. |
-| M4 — Reminders, records, and operations | Reminder scheduling and audit delivered; outbound adapter pending | Staff can schedule a reminder and inspect its audit event. |
+| M1 — Public site and approval demo | Repair 2 complete in source; live verification pending | A stranger can complete the sample, and a signed-in firm can start an empty durable approval workspace. |
+| M2 — Accounts, persistence, and subscriptions | Partial identity foundation only; subscriptions planned | A firm can sign in and return to an isolated workspace. |
+| M3 — Files, choices, and external links | Demo validation only; real workspace delivery planned | Clients can complete each action type through a scoped link. |
+| M4 — Reminders, records, and operations | Demo scheduling only; delivery and operations planned | Staff can schedule a reminder and inspect its audit event. |
 | M5 — Growth and integrations | Planned | Firms can import/share templates and connect action outcomes without turning the product into a project suite. |
 
 ### M1 — Public site and approval demo
 
-**Status:** Built and deployed on 2026-08-28. Builder gates pass; independent review/polish must reach PASS before M2 starts.
+**Status:** Repair 2 complete in source on 2026-09-05. The live deployment and independent verification still must pass.
 
 **User outcome:** without an account, a visitor can use realistic sample data to experience the smallest complete action loop.
 
@@ -426,14 +426,7 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 **Sample:** Northline Studio / Alder Street Bakery launch. Actions: approve the final menu proof due today, choose one of three launch-photo crops due tomorrow, upload the signed allergen sheet overdue by one day, and visit a hosted invoice link due in three days. M1 makes the approval action interactive; later action types are clearly marked as sample preview, not working claims. The sample client is Maya Chen and the sample staff owner is Theo Grant.
 
-**M1 claims:** `.factory/claims.json` is authoritative.
-
-- `demo-one-click`: Try a ready client action room in one click.
-- `demo-reset`: Demo changes are sample-only and resettable.
-- `client-no-account`: A client can approve a request without creating an account.
-- `deadline-order`: Open requests are ordered by deadline.
-- `approval-audit`: An approval records the decision, actor label, and server time.
-- `link-expiry`: An expired client link cannot read or submit the request.
+**M1 and repair claims:** `.factory/claims.json` is authoritative. Repair 2 adds real-workspace isolation, demo privacy, and staff-token boundary checks.
 
 **Tests:**
 
@@ -444,8 +437,8 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 **M1 definition of done:**
 
-- All six claim tests pass from the shipped `/demo` entry point; claim wording exactly matches visible copy and README.
-- Demo banner always says “Demo — sample data, nothing is saved,” with working Reset demo and Start for real. Start for real clears the session, then explains sign-in arrives in M2; it does not fake an account.
+- Every declared claim test passes from its documented clean sandbox; claim wording matches visible copy and README.
+- Demo banner always says “Demo — sample data, nothing is saved,” with working Reset demo and Start for real. Start for real clears the sample before shared-tenant sign-in and never copies sample data.
 - One-handed 390 px and keyboard journeys complete. Empty/loading/error/expired/offline states are present and plain.
 - Landing follows the required information order, has one `<h1>`, route-specific metadata, original assets with provenance, `/privacy`, `/terms`, crawlable good links, sitemap/robots, CSP and icons.
 - API is rate limited except health, uses no required secret, produces structured logs without client content, and the container runs as non-root on `PORT`.

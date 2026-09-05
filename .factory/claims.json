@@ -42,15 +42,15 @@
   {
     "id": "link-expiry",
     "milestone": "M1",
-    "claim": "An expired client link cannot read or submit the request",
+    "claim": "Client links last seven days, then cannot read or submit the request",
     "where": "landing fact, share-link panel, expired client state",
     "test": "npm run test:e2e -- --grep @claim:link-expiry",
-    "sandbox": "fresh demo fixture with an expired token; attempt client read and direct submission; assert both deny content and the page asks for a new link"
+    "sandbox": "fresh demo; assert a published link expires exactly seven days after server time; use an expired token; attempt client read and direct submission; assert both deny content"
   },
   {
     "id": "secure-upload",
     "milestone": "repair",
-    "claim": "A client PDF is type-checked, safety-scanned, and scoped",
+    "claim": "A client PDF is type-checked, malware-scanned, and scoped",
     "where": "landing, upload client action, README",
     "test": "npm run test:e2e -- --grep @claim:secure-upload",
     "sandbox": "fresh demo; publish only the upload action; assert an EICAR fixture is rejected, a PDF is accepted, and the clean result reaches the staff audit"
@@ -78,5 +78,29 @@
     "where": "demo action controls, README",
     "test": "npm run test:e2e -- --grep @claim:reminder-audit",
     "sandbox": "fresh demo; schedule a reminder for the open approval; assert the server time and staff actor appear in the audit"
+  },
+  {
+    "id": "real-workspace",
+    "milestone": "repair",
+    "claim": "A firm starts with an empty, isolated workspace that persists",
+    "where": "workspace onboarding, README",
+    "test": "npm run test:e2e -- --grep @claim:real-workspace",
+    "sandbox": "local auth fixture; create a named firm workspace with no seed data; create and publish an approval; complete it as a signed-out client; assert persistence and deny a second owner"
+  },
+  {
+    "id": "demo-privacy",
+    "milestone": "repair",
+    "claim": "Demo traffic stays on this site, data lasts at most 24 hours, and leaving deletes the room",
+    "where": "landing privacy section, privacy page, README",
+    "test": "npm run test:e2e -- --grep @claim:demo-privacy",
+    "sandbox": "fresh demo; record every browser request; exchange a fragment link; assert the fragment is removed and never requested; leave; assert the old room is unavailable"
+  },
+  {
+    "id": "staff-auth",
+    "milestone": "repair",
+    "claim": "Staff access rejects missing or invalid tokens",
+    "where": "workspace sign-in page, README",
+    "test": "npm run test:e2e -- --grep @claim:staff-auth",
+    "sandbox": "fresh browser context; request the staff workspace without a token and with an invalid token; assert 401 and WWW-Authenticate for both"
   }
 ]

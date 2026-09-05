@@ -1,13 +1,9 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
-let addressCounter = 20;
-
 async function freshContext(browser: Browser, mobile = false): Promise<BrowserContext> {
-  addressCounter += 1;
   return browser.newContext({
     viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 },
-    extraHTTPHeaders: { 'X-Forwarded-For': `198.51.100.${addressCounter}` },
   });
 }
 
@@ -28,7 +24,7 @@ async function publishAndApprove(page: Page, context: BrowserContext) {
   await expect(clientPage.getByRole('heading', { level: 1 })).toHaveText(
     'Approve the final menu proof',
   );
-  await clientPage.getByLabel('Approve this proof').check();
+  await clientPage.getByLabel('Approve this request').check();
   await clientPage.getByRole('button', { name: 'Record my answer' }).click();
   await expect(clientPage.getByTestId('client-completion')).toContainText('Approval recorded');
   return clientPage;
@@ -106,8 +102,14 @@ test('@claim:approval-audit An approval records the decision, actor label, and s
   await context.close();
 });
 
-test('@claim:link-expiry An expired client link cannot read or submit the request', async ({ browser }) => {
+test('@claim:link-expiry Client links last seven days, then cannot read or submit the request', async ({ browser }) => {
   const { context, page } = await openDemo(browser);
+  const queueResponse = await context.request.get('/api/v1/demo/queue');
+  const queue = await queueResponse.json();
+  const approvalId = queue.actions.find((action: { kind: string }) => action.kind === 'approval').id;
+  const published = await context.request.post(`/api/v1/demo/actions/${approvalId}/publish`);
+  const publishedBody = await published.json();
+  expect(Date.parse(publishedBody.expires_at) - Date.parse(queue.server_now)).toBe(7 * 24 * 60 * 60 * 1000);
   await page.getByRole('button', { name: 'Create expired link example' }).click();
   const href = await page.getByTestId('expired-client-link').getAttribute('href');
   const expiredPage = await context.newPage();
@@ -133,20 +135,32 @@ async function openTypedAction(page: Page, context: BrowserContext, kind: 'uploa
   return clientPage;
 }
 
-test('@claim:secure-upload A client PDF is type-checked, safety-scanned, and scoped', async ({ browser }) => {
+test('@claim:secure-upload A client PDF is type-checked, malware-scanned, and scoped', async ({ browser }) => {
   const { context, page } = await openDemo(browser);
   const clientPage = await openTypedAction(page, context, 'upload');
   await expect(clientPage.getByRole('heading', { level: 1 })).toHaveText('Upload the signed allergen sheet');
+  const queueResponse = await context.request.get('/api/v1/demo/queue');
+  const queue = await queueResponse.json();
+  const choiceId = queue.actions.find((action: { kind: string }) => action.kind === 'choice').id;
+  const outsideScope = await context.request.post(`/api/v1/client/actions/${choiceId}/choice`, {
+    data: { actor_label: 'Maya Chen', option_key: 'square' },
+  });
+  expect(outsideScope.status()).toBe(403);
   await clientPage.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
-    name: 'unsafe.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 EICAR test marker'),
+    name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a PDF'),
   });
   await clientPage.getByRole('button', { name: 'Upload and scan file' }).click();
-  await expect(clientPage.getByRole('alert')).toContainText('safety scan rejected');
+  await expect(clientPage.getByRole('alert')).toContainText('Upload one PDF file under 5 MB');
+  await clientPage.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
+    name: 'unsafe.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\nX5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'),
+  });
+  await clientPage.getByRole('button', { name: 'Upload and scan file' }).click();
+  await expect(clientPage.getByRole('alert')).toContainText('malware scan rejected', { timeout: 20_000 });
   await clientPage.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
     name: 'signed-allergen-sheet.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF'),
   });
   await clientPage.getByRole('button', { name: 'Upload and scan file' }).click();
-  await expect(clientPage.getByTestId('client-completion')).toContainText('File received and scanned');
+  await expect(clientPage.getByTestId('client-completion')).toContainText('File received and malware-scanned', { timeout: 20_000 });
   await page.reload();
   await expect(page.locator('[data-event="client_file_scanned"]')).toContainText('Clean PDF');
   await context.close();
@@ -184,6 +198,121 @@ test('@claim:reminder-audit Staff can schedule one reminder and see its audit re
   await context.close();
 });
 
+test('@claim:real-workspace A firm starts with an empty, isolated workspace that persists', async ({ browser }) => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_BASE_URL), 'Test identities are disabled outside the local sandbox.');
+  const owner = await freshContext(browser);
+  const ownerId = `firm-owner-${Date.now()}`;
+  const ownerHeaders = { Authorization: `Bearer test:${ownerId}` };
+  const initial = await owner.request.get('/api/v1/staff/workspace', { headers: ownerHeaders });
+  expect(initial.status()).toBe(404);
+
+  const created = await owner.request.post('/api/v1/staff/workspace', {
+    headers: ownerHeaders,
+    data: {
+      firm_name: 'River & Pine',
+      client_label: 'March launch',
+      client_actor: 'Ari Kim',
+    },
+  });
+  expect(created.status()).toBe(201);
+  expect((await created.json()).actions).toEqual([]);
+
+  const action = await owner.request.post('/api/v1/staff/actions', {
+    headers: { ...ownerHeaders, 'Idempotency-Key': 'real-action-create' },
+    data: {
+      title: 'Approve the launch copy',
+      instructions: 'Check the three headings and record your answer.',
+      due_at: '2026-08-29T14:00:00Z',
+    },
+  });
+  expect(action.status()).toBe(201);
+  const actionId = (await action.json()).id;
+  const published = await owner.request.post(`/api/v1/staff/actions/${actionId}/publish`, {
+    headers: { ...ownerHeaders, 'Idempotency-Key': 'real-action-publish' },
+  });
+  expect(published.status()).toBe(200);
+  const link = (await published.json()).path as string;
+
+  const client = await freshContext(browser);
+  const clientPage = await client.newPage();
+  await clientPage.goto(link);
+  await expect(clientPage.getByRole('heading', { level: 1 })).toHaveText('Approve the launch copy');
+  await expect(clientPage.getByText('River & Pine', { exact: true })).toBeVisible();
+  await clientPage.getByLabel('Approve this request').check();
+  await clientPage.getByRole('button', { name: 'Record my answer' }).click();
+  await expect(clientPage.getByTestId('client-completion')).toContainText('Approval recorded');
+
+  const persisted = await owner.request.get('/api/v1/staff/workspace', { headers: ownerHeaders });
+  const persistedBody = await persisted.json();
+  expect(persistedBody.namespace).toBe('real');
+  expect(persistedBody.actions).toHaveLength(1);
+  expect(persistedBody.actions[0].status).toBe('completed');
+  expect(persistedBody.audit.some((event: { event_name: string }) => event.event_name === 'client_decision_recorded')).toBe(true);
+
+  const other = await freshContext(browser);
+  const denied = await other.request.get('/api/v1/staff/workspace', {
+    headers: { Authorization: `Bearer test:other-${ownerId}` },
+  });
+  expect(denied.status()).toBe(404);
+  await client.close();
+  await owner.close();
+  await other.close();
+});
+
+test('@claim:demo-privacy Demo traffic stays on this site and leaving deletes the room', async ({ browser }) => {
+  const context = await freshContext(browser);
+  const page = await context.newPage();
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(request.url()));
+  await page.goto('/demo');
+  const queueBody = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/demo/queue');
+    if (!response.ok) throw new Error(`Queue request failed with ${response.status}`);
+    return response.json();
+  });
+  const lifetimeSeconds = (Date.parse(queueBody.expires_at) - Date.parse(queueBody.server_now)) / 1000;
+  expect(lifetimeSeconds).toBeGreaterThan(0);
+  expect(lifetimeSeconds).toBeLessThanOrEqual(86_400);
+
+  const approval = page.locator('.action-slip[data-kind="approval"]');
+  await approval.getByRole('button', { name: 'Schedule reminder' }).click();
+
+  await page.getByRole('button', { name: 'Publish client link' }).click();
+  const link = await page.getByTestId('open-client-link').getAttribute('href');
+  expect(link).toContain('#access=');
+  const clientPage = await context.newPage();
+  const clientRequests: string[] = [];
+  clientPage.on('request', (request) => clientRequests.push(request.url()));
+  await clientPage.goto(link!);
+  await expect(clientPage).toHaveURL(/\/client$/);
+  expect(clientRequests.some((url) => url.includes('access='))).toBe(false);
+
+  const removed = await context.request.delete('/api/v1/demo/session');
+  expect(removed.status()).toBe(204);
+  const gone = await context.request.get('/api/v1/demo/queue');
+  expect([401, 410]).toContain(gone.status());
+  const expectedOrigin = new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:4173').origin;
+  expect([...requests, ...clientRequests].every((url) => new URL(url).origin === expectedOrigin)).toBe(true);
+  await context.close();
+});
+
+test('@claim:staff-auth Staff access rejects missing or invalid tokens', async ({ browser }) => {
+  const context = await freshContext(browser);
+  const page = await context.newPage();
+  await page.goto('/workspace');
+  await expect(page.getByRole('button', { name: 'Sign in with Sociobot' })).toBeVisible();
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
+  const missing = await context.request.get('/api/v1/staff/workspace');
+  expect(missing.status()).toBe(401);
+  expect(missing.headers()['www-authenticate']).toBe('Bearer');
+  const invalid = await context.request.get('/api/v1/staff/workspace', {
+    headers: { Authorization: 'Bearer not-a-jwt' },
+  });
+  expect(invalid.status()).toBe(401);
+  expect(invalid.headers()['www-authenticate']).toBe('Bearer');
+  await context.close();
+});
+
 test('mobile, keyboard, routing, accessibility, and request privacy smoke', async ({ browser }) => {
   const context = await freshContext(browser, true);
   const page = await context.newPage();
@@ -215,7 +344,7 @@ test('mobile, keyboard, routing, accessibility, and request privacy smoke', asyn
   await page.goto('/privacy');
   await expect(page).toHaveTitle('Privacy — Client Action Room');
   await page.goto('/missing-record');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('This record is not in the archive');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('We could not find this page');
   await page.goBack();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('How Client Action Room handles data');
   await context.close();

@@ -48,7 +48,12 @@
   let composerError = '';
   let theme: 'light' | 'dark' = 'light';
   let staffAccount: AccountInfo | null = null;
-  let staffProfile: { id: string; name: string; email: string } | null = null;
+  let staffProfile: { id: string; name: string; email: string; has_workspace: boolean } | null = null;
+  let staffAccessToken = '';
+  let firmName = '';
+  let workspaceName = '';
+  let clientName = '';
+  let onboardingError = '';
 
   $: meta = routeMeta[route];
   $: canonical = `${canonicalOrigin}${meta.canonicalPath}`;
@@ -82,9 +87,6 @@
     if (route === 'demo') await loadDemo(new URLSearchParams(search).get('reset') === '1');
     if (route === 'client') await loadClient();
     if (route === 'workspace' || route === 'auth-callback') await loadWorkspace();
-    if (route === 'home' && new URLSearchParams(search).get('start') === '1') {
-      notice = 'The sample room was cleared. Real accounts and monthly plans are not available in this release.';
-    }
     await tick();
     document.querySelector<HTMLElement>('main h1')?.focus({ preventScroll: true });
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -163,13 +165,47 @@
       }
       if (staffAccount) {
         const token = await staffToken(staffAccount);
-        staffProfile = await api<{ id: string; name: string; email: string }>('/api/v1/me', {
+        staffAccessToken = token;
+        staffProfile = await api<{ id: string; name: string; email: string; has_workspace: boolean }>('/api/v1/me', {
           headers: { Authorization: `Bearer ${token}` },
         });
-        demo = await api<DemoQueue>('/api/v1/demo/queue');
+        if (staffProfile.has_workspace) {
+          demo = await api<DemoQueue>('/api/v1/staff/workspace', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } else {
+          demo = null;
+        }
       }
     } catch (caught) { showError(caught); }
     finally { loading = false; }
+  }
+
+  async function createWorkspace(event: SubmitEvent) {
+    event.preventDefault();
+    onboardingError = '';
+    if (!firmName.trim() || !workspaceName.trim() || !clientName.trim()) {
+      onboardingError = 'Name your firm, client workspace, and client.';
+      return;
+    }
+    busy = true;
+    try {
+      demo = await api<DemoQueue>('/api/v1/staff/workspace', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${staffAccessToken}` },
+        body: JSON.stringify({
+          firm_name: firmName,
+          client_label: workspaceName,
+          client_actor: clientName,
+        }),
+      });
+      if (staffProfile) staffProfile = { ...staffProfile, has_workspace: true };
+      notice = 'Your firm workspace is ready. Create the first approval.';
+    } catch (caught) {
+      onboardingError = caught instanceof Error ? caught.message : 'We could not create the workspace. Try again.';
+    } finally {
+      busy = false;
+    }
   }
 
   async function leaveWorkspace() {
@@ -183,12 +219,15 @@
     busy = true;
     error = '';
     try {
+      const root = route === 'demo' ? '/api/v1/demo' : '/api/v1/staff';
       publishedLink = await api<{ path: string; expires_at: string }>(
-        `/api/v1/demo/actions/${encodeURIComponent(action.id)}/publish`,
-        { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() } },
+        `${root}/actions/${encodeURIComponent(action.id)}/publish`,
+        { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID(), ...(route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {}) } },
       );
-      demo = await api<DemoQueue>('/api/v1/demo/queue');
-      notice = 'The client link is ready. It can open only this approval.';
+      demo = await api<DemoQueue>(route === 'demo' ? '/api/v1/demo/queue' : '/api/v1/staff/workspace', {
+        headers: route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
+      });
+      notice = 'The client link is ready. It can open only this action.';
     } catch (caught) {
       showError(caught);
     } finally {
@@ -220,16 +259,18 @@
     }
     busy = true;
     try {
-      await api<DemoAction>('/api/v1/demo/actions', {
+      await api<DemoAction>(route === 'demo' ? '/api/v1/demo/actions' : '/api/v1/staff/actions', {
         method: 'POST',
-        headers: { 'Idempotency-Key': crypto.randomUUID() },
+        headers: { 'Idempotency-Key': crypto.randomUUID(), ...(route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {}) },
         body: JSON.stringify({
           title: newTitle,
           instructions: newInstructions,
           due_at: new Date(newDeadline).toISOString(),
         }),
       });
-      demo = await api<DemoQueue>('/api/v1/demo/queue');
+      demo = await api<DemoQueue>(route === 'demo' ? '/api/v1/demo/queue' : '/api/v1/staff/workspace', {
+        headers: route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
+      });
       newTitle = '';
       newInstructions = '';
       newDeadline = '';
@@ -326,7 +367,7 @@
     busy = true; formError = '';
     try {
       completion = await api<Completion>(`/api/v1/client/actions/${encodeURIComponent(client.action.id)}/upload`, { method: 'POST', body: form });
-      notice = 'Your file passed the safety scan and is recorded.';
+      notice = 'Your file passed the malware scan and is recorded.';
     } catch (caught) { formError = caught instanceof Error ? caught.message : 'We could not scan your file. Try again.'; }
     finally { busy = false; }
   }
@@ -346,8 +387,14 @@
   async function scheduleReminder(action: DemoAction) {
     busy = true; error = '';
     try {
-      const result = await api<{ scheduled_for: string }>(`/api/v1/demo/actions/${encodeURIComponent(action.id)}/reminder`, { method: 'POST' });
-      demo = await api<DemoQueue>('/api/v1/demo/queue');
+      const root = route === 'demo' ? '/api/v1/demo' : '/api/v1/staff';
+      const result = await api<{ scheduled_for: string }>(`${root}/actions/${encodeURIComponent(action.id)}/reminder`, {
+        method: 'POST',
+        headers: route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
+      });
+      demo = await api<DemoQueue>(route === 'demo' ? '/api/v1/demo/queue' : '/api/v1/staff/workspace', {
+        headers: route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
+      });
       notice = `Reminder scheduled for ${formatDate(result.scheduled_for)}.`;
     } catch (caught) { showError(caught); }
     finally { busy = false; }
@@ -406,7 +453,7 @@
 
 <a class="skip-link" href="#main" onclick={skipToMain}>Skip to main content</a>
 <div class="route-announcer visually-hidden" aria-live="polite">{meta.title}</div>
-{#if route === 'demo' || route === 'client'}
+{#if route === 'demo' || (route === 'client' && client?.namespace === 'demo')}
   <DemoBanner busy={busy} onReset={() => navigate('/demo?reset=1')} onStart={startForReal} />
 {/if}
 <ArchiveHeader route={route} {navigate} {theme} {toggleTheme} />
@@ -415,7 +462,7 @@
   <main id="main" class="landing" tabindex="-1">
     <section class="hero" aria-labelledby="home-title">
       <div class="hero-copy">
-        <p class="eyebrow">One clear docket for the client</p>
+        <p class="eyebrow">Client action requests</p>
         <h1 id="home-title" tabindex="-1">Get client actions done on time</h1>
         <p class="lede">For small firms chasing approvals, files, choices, and payment links across email.</p>
         <div class="primary-row">
@@ -425,7 +472,7 @@
         {#if notice}<p class="inline-notice success" role="status">{notice}</p>{/if}
         <ul class="fact-lines" aria-label="Product facts">
           <li>Clients approve, choose, upload a PDF, or open an HTTPS link without an account.</li>
-          <li>An expired client link cannot read or submit the request.</li>
+          <li>Client links last seven days, then cannot read or submit the request.</li>
           <li>Demo changes are sample-only and resettable.</li>
         </ul>
       </div>
@@ -446,13 +493,13 @@
       <div class="section-heading"><p class="eyebrow">The product</p><h2 id="preview-title">See the next client action first</h2></div>
       <div class="preview-ledger">
         <p class="ledger-number">01</p>
-        <div><h3>Open requests are ordered by deadline</h3><p>Each link shows one action. Every answer, upload, choice, and outbound visit gets a server-timed audit entry.</p></div>
+        <div><h3>Open requests are ordered by deadline</h3><p>Each link shows one action. Each completed action adds a server-timed audit entry.</p></div>
         <a class="text-link" href="/demo" onclick={(event) => { event.preventDefault(); navigate('/demo'); }}>Open the working action room</a>
       </div>
     </section>
 
     <section id="how-it-works" class="steps" aria-labelledby="steps-title">
-      <div class="section-heading"><p class="eyebrow">How it works</p><h2 id="steps-title">Move one request through the window</h2></div>
+      <div class="section-heading"><p class="eyebrow">How it works</p><h2 id="steps-title">Send, complete, and record a request</h2></div>
       <ol>
         <li><span>1</span><div><h3>Issue the action</h3><p>Name the request and its deadline. The sample issues a seven-day client link.</p></div></li>
         <li><span>2</span><div><h3>Let the client act</h3><p>The client answers, chooses, uploads a checked PDF, or opens the named HTTPS site.</p></div></li>
@@ -461,10 +508,10 @@
     </section>
 
     <section class="boundary" aria-labelledby="boundary-title">
-      <div class="section-heading"><p class="eyebrow">A narrow promise</p><h2 id="boundary-title">This is not a project board</h2></div>
+      <div class="section-heading"><p class="eyebrow">Product limits</p><h2 id="boundary-title">This is not a project board</h2></div>
       <div class="boundary-copy">
         <p>Client Action Room does not edit documents, run chat, or claim a payment succeeded. It records focused client actions.</p>
-        <p>The sample uses a temporary server-side room. Reminder actions are recorded but no sample email is sent.</p>
+        <p>The demo stays on this site. It records reminder schedules but does not send email.</p>
         <a class="text-link" href="/privacy" onclick={(event) => { event.preventDefault(); navigate('/privacy'); }}>Read the privacy details</a>
       </div>
     </section>
@@ -473,20 +520,33 @@
 {:else if route === 'demo' || (route === 'workspace' && staffProfile)}
   <main id="main" class="app-page" tabindex="-1">
     <section class="page-intro">
-      <p class="eyebrow">Northline Studio · {route === 'demo' ? 'sample workspace' : 'firm workspace'}</p>
+      <p class="eyebrow">{demo?.firm ?? 'Firm workspace'} · {route === 'demo' ? 'sample workspace' : 'firm workspace'}</p>
       <h1 tabindex="-1">{route === 'demo' ? 'Your sample client action room' : 'Your firm action room'}</h1>
       <p>{route === 'demo' ? 'Open any scoped client action, complete it as Maya, then read the dated record.' : 'Create and issue client actions. Your workspace returns when you sign in again.'}</p>
     </section>
     {#if notice}<p class="inline-notice success" role="status">{notice}</p>{/if}
     {#if error}
-      <div class="inline-notice danger" role="alert"><p>{error}</p>{#if requestId}<small>Request ID: {requestId}</small>{/if}<button class="text-button" type="button" onclick={() => loadDemo()}>Try again</button></div>
+      <div class="inline-notice danger" role="alert"><p>{error}</p>{#if requestId}<small>Request ID: {requestId}</small>{/if}<button class="text-button" type="button" onclick={() => route === 'demo' ? loadDemo() : loadWorkspace()}>Try again</button></div>
     {/if}
     {#if loading}
       <section class="skeleton" aria-busy="true" aria-label="Loading the sample room"><span></span><span></span><span></span></section>
+    {:else if route === 'workspace' && staffProfile && !demo}
+      <form class="onboarding-form" onsubmit={createWorkspace} novalidate>
+        <h2>Name your first client workspace</h2>
+        <p>This starts empty. Sample data never moves into your firm account.</p>
+        {#if onboardingError}<p class="error-summary" role="alert">{onboardingError}</p>{/if}
+        <label for="firm-name">Firm name</label>
+        <input id="firm-name" maxlength="80" bind:value={firmName} required />
+        <label for="workspace-name">Client workspace name</label>
+        <input id="workspace-name" maxlength="80" bind:value={workspaceName} required />
+        <label for="client-name">Client name</label>
+        <input id="client-name" maxlength="80" bind:value={clientName} required />
+        <button class="button primary" type="submit" disabled={busy}>{busy ? 'Creating workspace…' : 'Create firm workspace'}</button>
+      </form>
     {:else if demo}
       <div class="workspace-header">
         <div><p class="meta-label">Client workspace</p><h2>{demo.workspace}</h2></div>
-        <dl><div><dt>Owner</dt><dd>{demo.staff_owner}</dd></div><div><dt>Client</dt><dd>{demo.client_actor}</dd></div><div><dt>{route === 'demo' ? 'Demo ends' : 'Retention review'}</dt><dd>{formatDate(demo.expires_at)}</dd></div></dl>
+        <dl><div><dt>Owner</dt><dd>{demo.staff_owner}</dd></div><div><dt>Client</dt><dd>{demo.client_actor}</dd></div>{#if route === 'demo'}<div><dt>Demo ends</dt><dd>{formatDate(demo.expires_at)}</dd></div>{/if}</dl>
       </div>
       <div class="staff-layout">
         <section class="deadline-rail" aria-labelledby="queue-title">
@@ -498,7 +558,7 @@
                 <h3>{action.title}</h3>
                 <p>{action.instructions}</p>
                 {#if action.status === 'completed'}
-                  <p class="recorded-note">Maya’s answer is in the audit record.</p>
+                  <p class="recorded-note">{demo.client_actor}’s answer is in the audit record.</p>
                 {:else}
                   <div class="button-row">
                     <button class="button primary compact" type="button" disabled={busy} onclick={() => publish(action)}>{action.kind === 'approval' ? 'Publish client link' : `Open ${action.kind === 'external_link' ? 'external' : action.kind} request`}</button>
@@ -510,7 +570,7 @@
           </ol>
         </section>
         <aside class="detail-sheet" aria-labelledby="share-title">
-          <p class="sheet-number">Service opening 01</p>
+          <p class="sheet-number">Client link</p>
           <h2 id="share-title">Share one action</h2>
           <p>Each link can read and complete only its named action. It expires after seven days.</p>
           {#if publishedLink}
@@ -538,7 +598,7 @@
               <button class="button secondary" type="submit" disabled={busy}>Create approval</button>
             </form>
           </details>
-          <div class="expiry-example">
+          {#if route === 'demo'}<div class="expiry-example">
             <h3>Check an expired link</h3>
             <p>This fixture proves expired links reveal no request content.</p>
             {#if expiredLink}
@@ -546,7 +606,7 @@
             {:else}
               <button class="text-button" type="button" disabled={busy} onclick={makeExpiredLink}>Create expired link example</button>
             {/if}
-          </div>
+          </div>{/if}
         </aside>
       </div>
       <section class="audit-ledger" aria-labelledby="audit-title">
@@ -597,7 +657,7 @@
               {#if submission.comment}<p class="client-comment">“{submission.comment}”</p>{/if}
               <p class="legal-note">This is an action record, not a regulated electronic signature.</p>
             {:else if completion}
-              <h2>{completion.kind === 'upload' ? 'File received and scanned' : completion.kind === 'choice' ? 'Choice recorded' : 'External link opened'}</h2>
+              <h2>{completion.kind === 'upload' ? 'File received and malware-scanned' : completion.kind === 'choice' ? 'Choice recorded' : 'External link opened'}</h2>
               <p>{completion.actor_label} · <time datetime={completion.occurred_at}>{formatDate(completion.occurred_at)}</time></p>
               <p>{completion.detail}</p>
               {#if completion.destination_url}<a class="button primary" href={completion.destination_url} target="_blank" rel="noopener noreferrer">Continue to {client.destination_host}</a>{/if}
@@ -611,12 +671,12 @@
             <input id="actor-label" name="actor-label" maxlength="80" autocomplete="name" bind:value={actorLabel} required />
             <fieldset>
               <legend>Your answer</legend>
-              <label class="radio-row"><input type="radio" name="decision" value="approved" bind:group={decision} /><span><strong>Approve this proof</strong><small>Record that the menu proof is approved.</small></span></label>
-              <label class="radio-row"><input type="radio" name="decision" value="changes_requested" bind:group={decision} /><span><strong>Ask for a change</strong><small>Tell Northline Studio what needs attention.</small></span></label>
+              <label class="radio-row"><input type="radio" name="decision" value="approved" bind:group={decision} /><span><strong>Approve this request</strong><small>Record that this request is approved.</small></span></label>
+              <label class="radio-row"><input type="radio" name="decision" value="changes_requested" bind:group={decision} /><span><strong>Ask for a change</strong><small>Tell {client.firm} what needs attention.</small></span></label>
             </fieldset>
             <label for="comment">Note {decision === 'changes_requested' ? '(required)' : '(optional)'}</label>
             <textarea id="comment" name="comment" rows="4" maxlength="1000" bind:value={comment} aria-describedby="comment-help"></textarea>
-            <small id="comment-help">The note becomes part of this sample audit record.</small>
+            <small id="comment-help">The note becomes part of this audit record.</small>
             <button class="button primary" type="submit" disabled={busy}>{busy ? 'Recording answer…' : 'Record my answer'}</button>
             <p class="legal-note">This records your intent. It is not a regulated electronic signature.</p>
           </form>
@@ -641,7 +701,7 @@
             <input id="upload-actor" maxlength="80" autocomplete="name" bind:value={actorLabel} required />
             <label for="client-file">Signed sheet (PDF, up to 5 MB)</label>
             <input id="client-file" type="file" accept="application/pdf,.pdf" required onchange={(event) => selectedFile = event.currentTarget.files?.[0] ?? null} />
-            <p class="legal-note">The sample checks the real file type and known test malware before recording it. Demo files expire within 24 hours.</p>
+            <p class="legal-note">The server checks the file type and scans it for malware before recording it. Files expire within 24 hours.</p>
             <button class="button primary" type="submit" disabled={busy}>{busy ? 'Scanning file…' : 'Upload and scan file'}</button>
           </form>
         {:else}
@@ -682,17 +742,18 @@
     <p class="eyebrow">Privacy</p>
     <h1 tabindex="-1">How Client Action Room handles data</h1>
     <p class="lede">The demo stores temporary sample changes and checked sample files. It does not create a firm account.</p>
-    <section><h2>What the demo stores</h2><p>The server assigns a random demo session and keeps its sample actions, link digests, answers, and audit times for up to 24 hours. A browser cookie holds only the random session reference.</p></section>
-    <section><h2>What client links reveal</h2><p>A client link can open one approval. The secret stays in the URL fragment, is exchanged once, and is not stored in server logs. The database stores a one-way digest.</p></section>
-    <section><h2>What we do not collect</h2><p>The demo has no analytics, advertising, account profiles, payment collection, or email delivery. Outbound sites open only after you choose them.</p></section>
-    <section><h2>Deletion and contact</h2><p>Resetting or leaving the demo deletes that sample room. Expired rooms are purged within an hour. For privacy questions, email <a href="mailto:privacy@sociobot.in">privacy@sociobot.in</a>.</p></section>
+    <section><h2>What the demo stores</h2><p>The server keeps sample actions, answers, files, and audit times for up to 24 hours.</p></section>
+    <section><h2>What client links reveal</h2><p>A client link opens one action. The browser removes its secret from the address after exchange.</p></section>
+    <section><h2>What the demo sends</h2><p>Demo traffic stays on this site. It does not send email, collect payment, or load advertising.</p></section>
+    <section><h2>What a firm workspace stores</h2><p>A firm workspace stores its names, approval requests, client answers, and audit times in the product database.</p></section>
+    <section><h2>Deletion and contact</h2><p>Resetting or leaving deletes the current sample room. For privacy questions, email <a href="mailto:privacy@sociobot.in">privacy@sociobot.in</a>.</p></section>
   </main>
 
 {:else if route === 'terms'}
   <main id="main" class="prose-page" tabindex="-1">
     <p class="eyebrow">Terms</p>
     <h1 tabindex="-1">Terms for Client Action Room</h1>
-    <p class="lede">These terms cover the public demo. Paid firm accounts are not offered in this release.</p>
+    <p class="lede">These terms cover the public demo and the current firm workspace. Recurring checkout is not available yet.</p>
     <section><h2>Use the demo lawfully</h2><p>Use the sample room to evaluate the approval flow. Do not enter confidential, regulated, illegal, or third-party personal information.</p></section>
     <section><h2>Approval records</h2><p>The demo records an approval or change request for evaluation. It is not a regulated electronic signature, legal advice, or proof of identity.</p></section>
     <section><h2>Availability and sample data</h2><p>Sample rooms expire after 24 hours and may be removed sooner for security or maintenance. Resetting or leaving removes the current sample.</p></section>
@@ -702,10 +763,10 @@
 {:else}
   <main id="main" class="not-found-page" tabindex="-1">
     <div class="empty-window" aria-hidden="true"><span></span></div>
-    <p class="eyebrow">404 · empty docket</p>
-    <h1 tabindex="-1">This record is not in the archive</h1>
+    <p class="eyebrow">404</p>
+    <h1 tabindex="-1">We could not find this page</h1>
     <p>The address does not match a Client Action Room page.</p>
-    <a class="button primary" href="/" onclick={(event) => { event.preventDefault(); navigate('/'); }}>Return to the front desk</a>
+    <a class="button primary" href="/" onclick={(event) => { event.preventDefault(); navigate('/'); }}>Return home</a>
   </main>
 {/if}
 

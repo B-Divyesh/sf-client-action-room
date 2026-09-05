@@ -239,7 +239,7 @@ Audit is a chronological ledger with filters and export, not an editable table. 
 
 Every route owns a title and plain description. Public page title: `Client Action Room — get client actions done` (44 characters). No title is just the product name or slug. Canonical URLs use `https://client-action-room.sociobot.in`. Open Graph/Twitter metadata references the real 1200×630 original scene. SVG favicon and 180 px touch icon use the bronze frame plus a single docket slit, with no letters too small to read.
 
-The consistent site frame contains a home wordmark, at most four navigation items, and the footer required by the product contract. The 404 uses an empty service opening and the line “This record is not in the archive,” followed by an obvious home action.
+The consistent site frame contains a home wordmark, at most four navigation items, and the footer required by the product contract. The 404 keeps the empty-window artwork but says “We could not find this page,” followed by a home action.
 
 ## Implementation checks
 

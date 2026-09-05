@@ -879,6 +879,22 @@ textarea {
   padding: var(--space-4) 0;
 }
 
+.onboarding-form {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 38rem;
+  padding: var(--space-6);
+  background: var(--color-surface);
+  border: 2px solid var(--color-frame);
+  border-radius: var(--radius-window);
+  box-shadow: var(--shadow-slip);
+}
+
+.onboarding-form h2,
+.onboarding-form p {
+  margin: 0;
+}
+
 .composer label {
   margin: var(--space-3) 0 var(--space-2);
   display: block;

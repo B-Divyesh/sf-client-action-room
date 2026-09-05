@@ -21,7 +21,7 @@ export default defineConfig({
     ? undefined
     : {
         command:
-          'npm run build:web && DATA_DIR=.data-test DIST_DIR=dist PORT=4173 DEMO_FIXED_NOW=2026-08-28T14:00:00Z cargo run --manifest-path server/Cargo.toml',
+          'npm run build:web && DATA_DIR=.data-test DIST_DIR=dist PORT=4173 DEMO_FIXED_NOW=2026-08-28T14:00:00Z MALWARE_SCANNER_MODE=fixture AUTH_TEST_MODE=1 cargo run --manifest-path server/Cargo.toml',
         url: 'http://127.0.0.1:4173/health',
         reuseExistingServer: false,
         timeout: 120_000,

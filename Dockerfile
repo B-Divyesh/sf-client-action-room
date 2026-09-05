@@ -19,9 +19,12 @@ RUN cargo build --release --locked
 
 FROM alpine:3.22 AS runtime
 ARG BUILD_SHA=dev
-RUN addgroup -S app && adduser -S -G app app \
+RUN apk add --no-cache clamav clamav-libunrar \
+    && freshclam --no-warnings \
+    && addgroup -S app && adduser -S -G app app \
     && mkdir -p /app/dist /data \
-    && chown -R app:app /app /data
+    && chown -R app:app /app /data \
+    && chmod -R a+rX /var/lib/clamav
 COPY --from=api-builder /build/target/release/client-action-room-api /usr/local/bin/client-action-room-api
 COPY --from=web-builder /build/dist /app/dist
 WORKDIR /app

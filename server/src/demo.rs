@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use uuid::Uuid;
 
+use crate::scanner::ScanOutcome;
 use crate::state::AppState;
 
 const DEMO_COOKIE: &str = "car_demo";
@@ -99,10 +100,11 @@ pub struct AuditEvent {
 
 #[derive(Debug, Serialize)]
 pub struct DemoQueue {
-    pub firm: &'static str,
-    pub workspace: &'static str,
-    pub staff_owner: &'static str,
-    pub client_actor: &'static str,
+    pub namespace: String,
+    pub firm: String,
+    pub workspace: String,
+    pub staff_owner: String,
+    pub client_actor: String,
     pub time_zone: &'static str,
     pub expires_at: String,
     pub server_now: String,
@@ -118,9 +120,9 @@ pub struct LinkResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateActionRequest {
-    title: String,
-    instructions: String,
-    due_at: String,
+    pub title: String,
+    pub instructions: String,
+    pub due_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,9 +132,10 @@ pub struct ExchangeRequest {
 
 #[derive(Debug, Serialize)]
 pub struct ClientActionResponse {
-    pub firm: &'static str,
-    pub workspace: &'static str,
-    pub client_actor: &'static str,
+    pub namespace: String,
+    pub firm: String,
+    pub workspace: String,
+    pub client_actor: String,
     pub link_expires_at: String,
     pub action: DemoAction,
     pub submission: Option<SubmissionResponse>,
@@ -199,11 +202,11 @@ pub async fn create_session(
         .purge_expired()
         .await
         .map_err(|_| ApiError::internal())?;
-    let (session_id, queue) = provision(&state).await?;
+    let (workspace_id, queue) = provision(&state).await?;
     Ok(with_cookie(
         StatusCode::CREATED,
         queue,
-        demo_cookie(&session_id, &headers, 86_400),
+        demo_cookie(&workspace_id, &headers, 86_400),
     ))
 }
 
@@ -215,16 +218,16 @@ pub async fn ensure_session(
         .purge_expired()
         .await
         .map_err(|_| ApiError::internal())?;
-    if let Some(session_id) = cookie_value(&headers, DEMO_COOKIE) {
-        if let Ok(queue) = load_queue(&state, &session_id).await {
+    if let Some(workspace_id) = cookie_value(&headers, DEMO_COOKIE) {
+        if let Ok(queue) = load_queue(&state, &workspace_id).await {
             return Ok((StatusCode::OK, Json(queue)).into_response());
         }
     }
-    let (session_id, queue) = provision(&state).await?;
+    let (workspace_id, queue) = provision(&state).await?;
     Ok(with_cookie(
         StatusCode::CREATED,
         queue,
-        demo_cookie(&session_id, &headers, 86_400),
+        demo_cookie(&workspace_id, &headers, 86_400),
     ))
 }
 
@@ -232,8 +235,8 @@ pub async fn queue(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DemoQueue>, ApiError> {
-    let session_id = valid_demo_session(&state, &headers).await?;
-    load_queue(&state, &session_id).await.map(Json)
+    let workspace_id = valid_demo_session(&state, &headers).await?;
+    load_queue(&state, &workspace_id).await.map(Json)
 }
 
 pub async fn reset_session(
@@ -241,17 +244,17 @@ pub async fn reset_session(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     if let Some(old_id) = cookie_value(&headers, DEMO_COOKIE) {
-        sqlx::query("DELETE FROM demo_sessions WHERE id = ?")
+        sqlx::query("DELETE FROM workspaces WHERE id = ? AND namespace = 'demo'")
             .bind(old_id)
             .execute(&state.pool)
             .await
             .map_err(|_| ApiError::internal())?;
     }
-    let (session_id, queue) = provision(&state).await?;
+    let (workspace_id, queue) = provision(&state).await?;
     Ok(with_cookie(
         StatusCode::OK,
         queue,
-        demo_cookie(&session_id, &headers, 86_400),
+        demo_cookie(&workspace_id, &headers, 86_400),
     ))
 }
 
@@ -259,9 +262,9 @@ pub async fn destroy_session(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    if let Some(session_id) = cookie_value(&headers, DEMO_COOKIE) {
-        sqlx::query("DELETE FROM demo_sessions WHERE id = ?")
-            .bind(session_id)
+    if let Some(workspace_id) = cookie_value(&headers, DEMO_COOKIE) {
+        sqlx::query("DELETE FROM workspaces WHERE id = ? AND namespace = 'demo'")
+            .bind(workspace_id)
             .execute(&state.pool)
             .await
             .map_err(|_| ApiError::internal())?;
@@ -285,10 +288,10 @@ pub async fn publish_link(
     headers: HeaderMap,
     Path(action_id): Path<String>,
 ) -> Result<Json<LinkResponse>, ApiError> {
-    let session_id = valid_demo_session(&state, &headers).await?;
-    let row = sqlx::query("SELECT kind, status FROM demo_actions WHERE id = ? AND session_id = ?")
+    let workspace_id = valid_demo_session(&state, &headers).await?;
+    let row = sqlx::query("SELECT kind, status FROM actions WHERE id = ? AND workspace_id = ?")
         .bind(&action_id)
-        .bind(&session_id)
+        .bind(&workspace_id)
         .fetch_optional(&state.pool)
         .await
         .map_err(|_| ApiError::internal())?
@@ -316,11 +319,11 @@ pub async fn publish_link(
     let grant_id = Uuid::now_v7().to_string();
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
     sqlx::query(
-        "INSERT INTO demo_grants (id, token_digest, session_id, action_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO client_grants (id, token_digest, workspace_id, action_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&grant_id)
     .bind(&digest)
-    .bind(&session_id)
+    .bind(&workspace_id)
     .bind(&action_id)
     .bind(now.to_rfc3339())
     .bind(expires_at.to_rfc3339())
@@ -329,7 +332,7 @@ pub async fn publish_link(
     .map_err(|_| ApiError::internal())?;
     append_audit(
         &mut tx,
-        &session_id,
+        &workspace_id,
         Some(&action_id),
         match kind.as_str() {
             "upload" => "upload_link_issued",
@@ -355,7 +358,7 @@ pub async fn create_action(
     headers: HeaderMap,
     Json(payload): Json<CreateActionRequest>,
 ) -> Result<(StatusCode, Json<DemoAction>), ApiError> {
-    let session_id = valid_demo_session(&state, &headers).await?;
+    let workspace_id = valid_demo_session(&state, &headers).await?;
     let title = payload.title.trim();
     let instructions = payload.instructions.trim();
     if title.is_empty() || title.chars().count() > 120 {
@@ -400,12 +403,12 @@ pub async fn create_action(
     };
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
     sqlx::query(
-        "INSERT INTO demo_actions
-         (id, session_id, kind, title, instructions, due_at, status, preview_only, version, created_at)
+        "INSERT INTO actions
+         (id, workspace_id, kind, title, instructions, due_at, status, preview_only, version, created_at)
          VALUES (?, ?, 'approval', ?, ?, ?, 'open', 0, 1, ?)",
     )
     .bind(&action.id)
-    .bind(&session_id)
+    .bind(&workspace_id)
     .bind(&action.title)
     .bind(&action.instructions)
     .bind(&action.due_at)
@@ -415,7 +418,7 @@ pub async fn create_action(
     .map_err(|_| ApiError::internal())?;
     append_audit(
         &mut tx,
-        &session_id,
+        &workspace_id,
         Some(&action.id),
         "action_created",
         "Theo Grant",
@@ -425,7 +428,7 @@ pub async fn create_action(
     .await?;
     append_audit(
         &mut tx,
-        &session_id,
+        &workspace_id,
         Some(&action.id),
         "deadline_set",
         "Theo Grant",
@@ -441,11 +444,11 @@ pub async fn expired_link(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<LinkResponse>, ApiError> {
-    let session_id = valid_demo_session(&state, &headers).await?;
+    let workspace_id = valid_demo_session(&state, &headers).await?;
     let action_id: String = sqlx::query_scalar(
-        "SELECT id FROM demo_actions WHERE session_id = ? AND kind = 'approval' LIMIT 1",
+        "SELECT id FROM actions WHERE workspace_id = ? AND kind = 'approval' LIMIT 1",
     )
-    .bind(&session_id)
+    .bind(&workspace_id)
     .fetch_one(&state.pool)
     .await
     .map_err(|_| ApiError::internal())?;
@@ -453,11 +456,11 @@ pub async fn expired_link(
     let now = state.now();
     let expires_at = now - ChronoDuration::hours(1);
     sqlx::query(
-        "INSERT INTO demo_grants (id, token_digest, session_id, action_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO client_grants (id, token_digest, workspace_id, action_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(Uuid::now_v7().to_string())
     .bind(token_digest(&token))
-    .bind(&session_id)
+    .bind(&workspace_id)
     .bind(&action_id)
     .bind((now - ChronoDuration::days(8)).to_rfc3339())
     .bind(expires_at.to_rfc3339())
@@ -482,7 +485,7 @@ pub async fn exchange_link(
     let digest = token_digest(&payload.token);
     let row = sqlx::query(
         "SELECT g.id, g.expires_at, g.revoked_at, s.expires_at AS session_expires_at
-         FROM demo_grants g JOIN demo_sessions s ON s.id = g.session_id
+         FROM client_grants g JOIN workspaces s ON s.id = g.workspace_id
          WHERE g.token_digest = ?",
     )
     .bind(digest)
@@ -499,15 +502,15 @@ pub async fn exchange_link(
     }
 
     let grant_id: String = row.get("id");
-    let client_session_id = Uuid::now_v7().to_string();
+    let client_workspace_id = Uuid::now_v7().to_string();
     let client_expires_at = [expires_at, now + ChronoDuration::hours(2)]
         .into_iter()
         .min()
         .expect("two dates");
     sqlx::query(
-        "INSERT INTO demo_client_sessions (id, grant_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO client_sessions (id, grant_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
     )
-    .bind(&client_session_id)
+    .bind(&client_workspace_id)
     .bind(grant_id)
     .bind(now.to_rfc3339())
     .bind(client_expires_at.to_rfc3339())
@@ -519,7 +522,7 @@ pub async fn exchange_link(
     Ok(with_cookie(
         StatusCode::OK,
         response_body,
-        client_cookie(&client_session_id, &headers, 7_200),
+        client_cookie(&client_workspace_id, &headers, 7_200),
     ))
 }
 
@@ -535,7 +538,7 @@ pub async fn client_action(
     let action = load_action(&state, &action_id).await?;
     let submission = load_submission(&state, &action_id).await?;
     let choices = sqlx::query(
-        "SELECT option_key, label FROM demo_action_options WHERE action_id = ? ORDER BY position",
+        "SELECT option_key, label FROM action_options WHERE action_id = ? ORDER BY position",
     )
     .bind(&action_id)
     .fetch_all(&state.pool)
@@ -548,15 +551,16 @@ pub async fn client_action(
     })
     .collect();
     let external =
-        sqlx::query("SELECT url, destination_host FROM demo_external_links WHERE action_id = ?")
+        sqlx::query("SELECT url, destination_host FROM external_links WHERE action_id = ?")
             .bind(&action_id)
             .fetch_optional(&state.pool)
             .await
             .map_err(|_| ApiError::internal())?;
     Ok(Json(ClientActionResponse {
-        firm: "Northline Studio",
-        workspace: "Alder Street Bakery launch",
-        client_actor: "Maya Chen",
+        namespace: row.get("namespace"),
+        firm: row.get("firm_name"),
+        workspace: row.get("client_label"),
+        client_actor: row.get("client_actor"),
         link_expires_at: row.get("link_expires_at"),
         action,
         submission,
@@ -597,7 +601,7 @@ pub async fn submit_action(
             "This client link cannot open that request.",
         ));
     }
-    let kind: String = sqlx::query_scalar("SELECT kind FROM demo_actions WHERE id = ?")
+    let kind: String = sqlx::query_scalar("SELECT kind FROM actions WHERE id = ?")
         .bind(&action_id)
         .fetch_one(&state.pool)
         .await
@@ -616,7 +620,7 @@ pub async fn submit_action(
     }
 
     let now = state.now();
-    let session_id: String = scope.get("session_id");
+    let workspace_id: String = scope.get("workspace_id");
     let grant_id: String = scope.get("grant_id");
     let request_hash = hex::encode(Sha256::digest(
         serde_json::to_vec(&payload).map_err(|_| ApiError::internal())?,
@@ -625,12 +629,12 @@ pub async fn submit_action(
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
 
     let insert = sqlx::query(
-        "INSERT INTO demo_submissions
-         (id, session_id, action_id, grant_id, actor_label, decision, comment, idempotency_key, request_hash, occurred_at)
+        "INSERT INTO approval_submissions
+         (id, workspace_id, action_id, grant_id, actor_label, decision, comment, idempotency_key, request_hash, occurred_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&submission_id)
-    .bind(&session_id)
+    .bind(&workspace_id)
     .bind(&action_id)
     .bind(&grant_id)
     .bind(payload.actor_label.trim())
@@ -651,14 +655,14 @@ pub async fn submit_action(
         return Err(ApiError::internal());
     }
 
-    sqlx::query("UPDATE demo_actions SET status = 'completed', version = version + 1 WHERE id = ? AND status = 'open'")
+    sqlx::query("UPDATE actions SET status = 'completed', version = version + 1 WHERE id = ? AND status = 'open'")
         .bind(&action_id)
         .execute(&mut *tx)
         .await
         .map_err(|_| ApiError::internal())?;
     append_audit(
         &mut tx,
-        &session_id,
+        &workspace_id,
         Some(&action_id),
         "client_decision_recorded",
         payload.actor_label.trim(),
@@ -685,10 +689,10 @@ pub async fn submit_choice(
     Json(payload): Json<ChoiceRequest>,
 ) -> Result<Json<CompletionResponse>, ApiError> {
     enforce_same_origin(&headers)?;
-    let (session_id, grant_id) = scoped_client(&state, &headers, &action_id, "choice").await?;
+    let (workspace_id, grant_id) = scoped_client(&state, &headers, &action_id, "choice").await?;
     validate_actor(&payload.actor_label)?;
     let label: String = sqlx::query_scalar(
-        "SELECT label FROM demo_action_options WHERE action_id = ? AND option_key = ?",
+        "SELECT label FROM action_options WHERE action_id = ? AND option_key = ?",
     )
     .bind(&action_id)
     .bind(&payload.option_key)
@@ -704,13 +708,13 @@ pub async fn submit_choice(
     })?;
     let now = state.now();
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
-    sqlx::query("INSERT OR IGNORE INTO demo_choice_submissions (id, session_id, action_id, grant_id, actor_label, option_key, option_label, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(Uuid::now_v7().to_string()).bind(&session_id).bind(&action_id).bind(&grant_id)
+    sqlx::query("INSERT OR IGNORE INTO choice_submissions (id, workspace_id, action_id, grant_id, actor_label, option_key, option_label, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(Uuid::now_v7().to_string()).bind(&workspace_id).bind(&action_id).bind(&grant_id)
         .bind(payload.actor_label.trim()).bind(&payload.option_key).bind(&label).bind(now.to_rfc3339())
         .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
     complete_action(
         &mut tx,
-        &session_id,
+        &workspace_id,
         &action_id,
         "client_choice_recorded",
         payload.actor_label.trim(),
@@ -735,7 +739,7 @@ pub async fn upload_file(
     mut multipart: Multipart,
 ) -> Result<Json<CompletionResponse>, ApiError> {
     enforce_same_origin(&headers)?;
-    let (session_id, grant_id) = scoped_client(&state, &headers, &action_id, "upload").await?;
+    let (workspace_id, grant_id) = scoped_client(&state, &headers, &action_id, "upload").await?;
     let mut actor = String::new();
     let mut filename = String::new();
     let mut bytes = Vec::new();
@@ -773,26 +777,33 @@ pub async fn upload_file(
             "Upload one PDF file under 5 MB.",
         ));
     }
-    if bytes
-        .windows(5)
-        .any(|part| part.eq_ignore_ascii_case(b"EICAR"))
-    {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "malware_detected",
-            "The safety scan rejected this file. Choose a different PDF.",
-        ));
-    }
+    let scan_engine = match state.scanner.scan(&bytes).await {
+        ScanOutcome::Clean { engine } => engine,
+        ScanOutcome::Infected => {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "malware_detected",
+                "The malware scan rejected this file. Choose a different PDF.",
+            ));
+        }
+        ScanOutcome::Unavailable => {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "scanner_unavailable",
+                "The malware scanner is unavailable. Keep the file and try again later.",
+            ));
+        }
+    };
     let now = state.now();
     let checksum = hex::encode(Sha256::digest(&bytes));
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
-    sqlx::query("INSERT OR IGNORE INTO demo_uploads (id, session_id, action_id, grant_id, actor_label, original_filename, detected_mime, byte_size, checksum_sha256, scan_state, content, expires_at, occurred_at) VALUES (?, ?, ?, ?, ?, ?, 'application/pdf', ?, ?, 'clean', ?, ?, ?)")
-        .bind(Uuid::now_v7().to_string()).bind(&session_id).bind(&action_id).bind(&grant_id).bind(actor.trim())
-        .bind(&filename).bind(bytes.len() as i64).bind(&checksum).bind(bytes).bind((now + ChronoDuration::hours(24)).to_rfc3339()).bind(now.to_rfc3339())
+    sqlx::query("INSERT OR IGNORE INTO uploads (id, workspace_id, action_id, grant_id, actor_label, original_filename, detected_mime, byte_size, checksum_sha256, scan_state, content, expires_at, occurred_at, scan_engine, scanned_at) VALUES (?, ?, ?, ?, ?, ?, 'application/pdf', ?, ?, 'clean', ?, ?, ?, ?, ?)")
+        .bind(Uuid::now_v7().to_string()).bind(&workspace_id).bind(&action_id).bind(&grant_id).bind(actor.trim())
+        .bind(&filename).bind(bytes.len() as i64).bind(&checksum).bind(bytes).bind((now + ChronoDuration::hours(24)).to_rfc3339()).bind(now.to_rfc3339()).bind(&scan_engine).bind(now.to_rfc3339())
         .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
     complete_action(
         &mut tx,
-        &session_id,
+        &workspace_id,
         &action_id,
         "client_file_scanned",
         actor.trim(),
@@ -804,7 +815,7 @@ pub async fn upload_file(
     Ok(Json(CompletionResponse {
         kind: "upload".into(),
         actor_label: actor.trim().into(),
-        detail: format!("{filename} · safety scan passed"),
+        detail: format!("{filename} · malware scan passed"),
         occurred_at: now.to_rfc3339(),
         destination_url: None,
     }))
@@ -817,15 +828,14 @@ pub async fn record_external_visit(
     Json(payload): Json<VisitRequest>,
 ) -> Result<Json<CompletionResponse>, ApiError> {
     enforce_same_origin(&headers)?;
-    let (session_id, grant_id) =
+    let (workspace_id, grant_id) =
         scoped_client(&state, &headers, &action_id, "external_link").await?;
     validate_actor(&payload.actor_label)?;
-    let row =
-        sqlx::query("SELECT url, destination_host FROM demo_external_links WHERE action_id = ?")
-            .bind(&action_id)
-            .fetch_one(&state.pool)
-            .await
-            .map_err(|_| ApiError::internal())?;
+    let row = sqlx::query("SELECT url, destination_host FROM external_links WHERE action_id = ?")
+        .bind(&action_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|_| ApiError::internal())?;
     let url: String = row.get("url");
     let host: String = row.get("destination_host");
     if !url.starts_with("https://") || host == "localhost" || host.starts_with("127.") {
@@ -837,12 +847,12 @@ pub async fn record_external_visit(
     }
     let now = state.now();
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
-    sqlx::query("INSERT OR IGNORE INTO demo_external_visits (id, session_id, action_id, grant_id, actor_label, destination_host, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(Uuid::now_v7().to_string()).bind(&session_id).bind(&action_id).bind(&grant_id).bind(payload.actor_label.trim()).bind(&host).bind(now.to_rfc3339())
+    sqlx::query("INSERT OR IGNORE INTO external_visits (id, workspace_id, action_id, grant_id, actor_label, destination_host, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(Uuid::now_v7().to_string()).bind(&workspace_id).bind(&action_id).bind(&grant_id).bind(payload.actor_label.trim()).bind(&host).bind(now.to_rfc3339())
         .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
     complete_action(
         &mut tx,
-        &session_id,
+        &workspace_id,
         &action_id,
         "external_link_opened",
         payload.actor_label.trim(),
@@ -865,12 +875,12 @@ pub async fn schedule_reminder(
     headers: HeaderMap,
     Path(action_id): Path<String>,
 ) -> Result<Json<ReminderResponse>, ApiError> {
-    let session_id = valid_demo_session(&state, &headers).await?;
+    let workspace_id = valid_demo_session(&state, &headers).await?;
     let exists: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM demo_actions WHERE id = ? AND session_id = ? AND status = 'open'",
+        "SELECT COUNT(*) FROM actions WHERE id = ? AND workspace_id = ? AND status = 'open'",
     )
     .bind(&action_id)
-    .bind(&session_id)
+    .bind(&workspace_id)
     .fetch_one(&state.pool)
     .await
     .map_err(|_| ApiError::internal())?;
@@ -884,12 +894,12 @@ pub async fn schedule_reminder(
     let now = state.now();
     let scheduled = now + ChronoDuration::hours(1);
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
-    sqlx::query("INSERT OR REPLACE INTO demo_reminders (id, session_id, action_id, scheduled_for, channel, status, created_at) VALUES (?, ?, ?, ?, 'email', 'scheduled', ?)")
-        .bind(Uuid::now_v7().to_string()).bind(&session_id).bind(&action_id).bind(scheduled.to_rfc3339()).bind(now.to_rfc3339())
+    sqlx::query("INSERT OR REPLACE INTO reminders (id, workspace_id, action_id, scheduled_for, channel, status, created_at) VALUES (?, ?, ?, ?, 'email', 'scheduled', ?)")
+        .bind(Uuid::now_v7().to_string()).bind(&workspace_id).bind(&action_id).bind(scheduled.to_rfc3339()).bind(now.to_rfc3339())
         .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
     append_audit(
         &mut tx,
-        &session_id,
+        &workspace_id,
         Some(&action_id),
         "reminder_scheduled",
         "Theo Grant",
@@ -922,7 +932,7 @@ async fn scoped_client(
             "This client link cannot open that request.",
         ));
     }
-    let actual_kind: String = sqlx::query_scalar("SELECT kind FROM demo_actions WHERE id = ?")
+    let actual_kind: String = sqlx::query_scalar("SELECT kind FROM actions WHERE id = ?")
         .bind(action_id)
         .fetch_one(&state.pool)
         .await
@@ -934,21 +944,21 @@ async fn scoped_client(
             "Use the control shown for this request.",
         ));
     }
-    Ok((scope.get("session_id"), scope.get("grant_id")))
+    Ok((scope.get("workspace_id"), scope.get("grant_id")))
 }
 
 async fn complete_action(
     tx: &mut Transaction<'_, Sqlite>,
-    session_id: &str,
+    workspace_id: &str,
     action_id: &str,
     event: &str,
     actor: &str,
     detail: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<(), ApiError> {
-    sqlx::query("UPDATE demo_actions SET status = 'completed', version = version + 1 WHERE id = ? AND status = 'open'")
+    sqlx::query("UPDATE actions SET status = 'completed', version = version + 1 WHERE id = ? AND status = 'open'")
         .bind(action_id).execute(&mut **tx).await.map_err(|_| ApiError::internal())?;
-    append_audit(tx, session_id, Some(action_id), event, actor, detail, now).await
+    append_audit(tx, workspace_id, Some(action_id), event, actor, detail, now).await
 }
 
 fn validate_actor(actor: &str) -> Result<(), ApiError> {
@@ -966,35 +976,16 @@ async fn provision(state: &AppState) -> Result<(String, DemoQueue), ApiError> {
     provision_with_lifetime(state, ChronoDuration::hours(24)).await
 }
 
-pub async fn provision_staff(state: &AppState, oid: &str) -> Result<(String, DemoQueue), ApiError> {
-    if let Some(session_id) = sqlx::query_scalar::<_, String>(
-        "SELECT session_id FROM staff_workspaces WHERE entra_oid = ?",
-    )
-    .bind(oid)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| ApiError::internal())?
-    {
-        if let Ok(queue) = load_queue(state, &session_id).await {
-            return Ok((session_id, queue));
-        }
-    }
-    let (session_id, queue) = provision_with_lifetime(state, ChronoDuration::days(3650)).await?;
-    sqlx::query("INSERT OR REPLACE INTO staff_workspaces (entra_oid, session_id, created_at) VALUES (?, ?, ?)")
-        .bind(oid).bind(&session_id).bind(state.now().to_rfc3339()).execute(&state.pool).await.map_err(|_| ApiError::internal())?;
-    Ok((session_id, queue))
-}
-
 async fn provision_with_lifetime(
     state: &AppState,
     lifetime: ChronoDuration,
 ) -> Result<(String, DemoQueue), ApiError> {
     let now = state.now();
-    let session_id = Uuid::now_v7().to_string();
+    let workspace_id = Uuid::now_v7().to_string();
     let expires_at = now + lifetime;
     let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
-    sqlx::query("INSERT INTO demo_sessions (id, created_at, expires_at) VALUES (?, ?, ?)")
-        .bind(&session_id)
+    sqlx::query("INSERT INTO workspaces (id, created_at, expires_at) VALUES (?, ?, ?)")
+        .bind(&workspace_id)
         .bind(now.to_rfc3339())
         .bind(expires_at.to_rfc3339())
         .execute(&mut *tx)
@@ -1044,12 +1035,12 @@ async fn provision_with_lifetime(
             external_id.clone_from(&id);
         }
         sqlx::query(
-            "INSERT INTO demo_actions
-             (id, session_id, kind, title, instructions, due_at, status, preview_only, version, created_at)
+            "INSERT INTO actions
+             (id, workspace_id, kind, title, instructions, due_at, status, preview_only, version, created_at)
              VALUES (?, ?, ?, ?, ?, ?, 'open', ?, 1, ?)",
         )
         .bind(&id)
-        .bind(&session_id)
+        .bind(&workspace_id)
         .bind(kind)
         .bind(title)
         .bind(instructions)
@@ -1065,22 +1056,20 @@ async fn provision_with_lifetime(
         ("square", "Square pastry crop", 2_i64),
         ("portrait", "Portrait storefront crop", 3_i64),
     ] {
-        sqlx::query("INSERT INTO demo_action_options (action_id, option_key, label, position) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO action_options (action_id, option_key, label, position) VALUES (?, ?, ?, ?)")
             .bind(&choice_id).bind(key).bind(label).bind(position)
             .execute(&mut *tx).await.map_err(|_| ApiError::internal())?;
     }
-    sqlx::query(
-        "INSERT INTO demo_external_links (action_id, url, destination_host) VALUES (?, ?, ?)",
-    )
-    .bind(&external_id)
-    .bind("https://example.com/")
-    .bind("example.com")
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| ApiError::internal())?;
+    sqlx::query("INSERT INTO external_links (action_id, url, destination_host) VALUES (?, ?, ?)")
+        .bind(&external_id)
+        .bind("https://example.com/")
+        .bind("example.com")
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| ApiError::internal())?;
     append_audit(
         &mut tx,
-        &session_id,
+        &workspace_id,
         Some(&approval_id),
         "action_created",
         "Theo Grant",
@@ -1090,7 +1079,7 @@ async fn provision_with_lifetime(
     .await?;
     append_audit(
         &mut tx,
-        &session_id,
+        &workspace_id,
         Some(&approval_id),
         "deadline_set",
         "Theo Grant",
@@ -1099,14 +1088,17 @@ async fn provision_with_lifetime(
     )
     .await?;
     tx.commit().await.map_err(|_| ApiError::internal())?;
-    let queue = load_queue(state, &session_id).await?;
-    Ok((session_id, queue))
+    let queue = load_queue(state, &workspace_id).await?;
+    Ok((workspace_id, queue))
 }
 
-pub(crate) async fn load_queue(state: &AppState, session_id: &str) -> Result<DemoQueue, ApiError> {
-    let expires_at: String =
-        sqlx::query_scalar("SELECT expires_at FROM demo_sessions WHERE id = ?")
-            .bind(session_id)
+pub(crate) async fn load_queue(
+    state: &AppState,
+    workspace_id: &str,
+) -> Result<DemoQueue, ApiError> {
+    let workspace_row =
+        sqlx::query("SELECT namespace, expires_at, firm_name, client_label, staff_label, client_actor FROM workspaces WHERE id = ?")
+            .bind(workspace_id)
             .fetch_optional(&state.pool)
             .await
             .map_err(|_| ApiError::internal())?
@@ -1117,6 +1109,7 @@ pub(crate) async fn load_queue(state: &AppState, session_id: &str) -> Result<Dem
                     "This sample room has expired. Reset the demo to open a fresh copy.",
                 )
             })?;
+    let expires_at: String = workspace_row.get("expires_at");
     if parse_time(&expires_at)? <= state.now() {
         return Err(ApiError::new(
             StatusCode::GONE,
@@ -1127,9 +1120,9 @@ pub(crate) async fn load_queue(state: &AppState, session_id: &str) -> Result<Dem
 
     let rows = sqlx::query(
         "SELECT id, kind, title, instructions, due_at, status, preview_only, version
-         FROM demo_actions WHERE session_id = ? ORDER BY due_at ASC, id ASC",
+         FROM actions WHERE workspace_id = ? ORDER BY due_at ASC, id ASC",
     )
-    .bind(session_id)
+    .bind(workspace_id)
     .fetch_all(&state.pool)
     .await
     .map_err(|_| ApiError::internal())?;
@@ -1148,9 +1141,9 @@ pub(crate) async fn load_queue(state: &AppState, session_id: &str) -> Result<Dem
         .collect();
     let audit_rows = sqlx::query(
         "SELECT id, action_id, event_name, actor_label, decision, occurred_at
-         FROM demo_audit_events WHERE session_id = ? ORDER BY occurred_at ASC, id ASC",
+         FROM audit_events WHERE workspace_id = ? ORDER BY occurred_at ASC, id ASC",
     )
-    .bind(session_id)
+    .bind(workspace_id)
     .fetch_all(&state.pool)
     .await
     .map_err(|_| ApiError::internal())?;
@@ -1167,10 +1160,11 @@ pub(crate) async fn load_queue(state: &AppState, session_id: &str) -> Result<Dem
         .collect();
 
     Ok(DemoQueue {
-        firm: "Northline Studio",
-        workspace: "Alder Street Bakery launch",
-        staff_owner: "Theo Grant",
-        client_actor: "Maya Chen",
+        namespace: workspace_row.get("namespace"),
+        firm: workspace_row.get("firm_name"),
+        workspace: workspace_row.get("client_label"),
+        staff_owner: workspace_row.get("staff_label"),
+        client_actor: workspace_row.get("client_actor"),
         time_zone: "America/New_York",
         expires_at,
         server_now: state.now().to_rfc3339(),
@@ -1180,17 +1174,17 @@ pub(crate) async fn load_queue(state: &AppState, session_id: &str) -> Result<Dem
 }
 
 async fn valid_demo_session(state: &AppState, headers: &HeaderMap) -> Result<String, ApiError> {
-    let session_id = cookie_value(headers, DEMO_COOKIE).ok_or_else(|| {
+    let workspace_id = cookie_value(headers, DEMO_COOKIE).ok_or_else(|| {
         ApiError::unauthorized("Open the demo again to create a fresh sample room.")
     })?;
     let expires_at: Option<String> =
-        sqlx::query_scalar("SELECT expires_at FROM demo_sessions WHERE id = ?")
-            .bind(&session_id)
+        sqlx::query_scalar("SELECT expires_at FROM workspaces WHERE id = ? AND namespace = 'demo'")
+            .bind(&workspace_id)
             .fetch_optional(&state.pool)
             .await
             .map_err(|_| ApiError::internal())?;
     match expires_at {
-        Some(value) if parse_time(&value)? > state.now() => Ok(session_id),
+        Some(value) if parse_time(&value)? > state.now() => Ok(workspace_id),
         _ => Err(ApiError::new(
             StatusCode::GONE,
             "demo_expired",
@@ -1205,11 +1199,12 @@ async fn client_scope(
 ) -> Result<sqlx::sqlite::SqliteRow, ApiError> {
     let row = sqlx::query(
         "SELECT cs.expires_at AS client_expires_at, g.id AS grant_id, g.action_id,
-                g.session_id, g.expires_at AS link_expires_at, g.revoked_at,
+                g.workspace_id, g.expires_at AS link_expires_at, g.revoked_at,
+                ds.namespace, ds.firm_name, ds.client_label, ds.client_actor,
                 ds.expires_at AS demo_expires_at
-         FROM demo_client_sessions cs
-         JOIN demo_grants g ON g.id = cs.grant_id
-         JOIN demo_sessions ds ON ds.id = g.session_id
+         FROM client_sessions cs
+         JOIN client_grants g ON g.id = cs.grant_id
+         JOIN workspaces ds ON ds.id = g.workspace_id
          WHERE cs.id = ?",
     )
     .bind(client_id)
@@ -1232,7 +1227,7 @@ async fn client_scope(
 async fn load_action(state: &AppState, action_id: &str) -> Result<DemoAction, ApiError> {
     let row = sqlx::query(
         "SELECT id, kind, title, instructions, due_at, status, preview_only, version
-         FROM demo_actions WHERE id = ?",
+         FROM actions WHERE id = ?",
     )
     .bind(action_id)
     .fetch_optional(&state.pool)
@@ -1257,7 +1252,7 @@ async fn load_submission(
 ) -> Result<Option<SubmissionResponse>, ApiError> {
     let row = sqlx::query(
         "SELECT id, actor_label, decision, comment, occurred_at
-         FROM demo_submissions WHERE action_id = ? ORDER BY occurred_at ASC LIMIT 1",
+         FROM approval_submissions WHERE action_id = ? ORDER BY occurred_at ASC LIMIT 1",
     )
     .bind(action_id)
     .fetch_optional(&state.pool)
@@ -1273,9 +1268,9 @@ async fn load_submission(
     }))
 }
 
-async fn append_audit(
+pub(crate) async fn append_audit(
     tx: &mut Transaction<'_, Sqlite>,
-    session_id: &str,
+    workspace_id: &str,
     action_id: Option<&str>,
     event_name: &str,
     actor_label: &str,
@@ -1283,12 +1278,12 @@ async fn append_audit(
     occurred_at: DateTime<Utc>,
 ) -> Result<(), ApiError> {
     sqlx::query(
-        "INSERT INTO demo_audit_events
-         (id, session_id, action_id, event_name, actor_label, decision, occurred_at)
+        "INSERT INTO audit_events
+         (id, workspace_id, action_id, event_name, actor_label, decision, occurred_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(Uuid::now_v7().to_string())
-    .bind(session_id)
+    .bind(workspace_id)
     .bind(action_id)
     .bind(event_name)
     .bind(actor_label)
@@ -1353,7 +1348,7 @@ fn expired_error() -> ApiError {
     ApiError::new(
         StatusCode::GONE,
         "client_link_expired",
-        "This client link has expired. Ask Northline Studio for a new link.",
+        "This client link has expired. Ask the firm for a new link.",
     )
 }
 

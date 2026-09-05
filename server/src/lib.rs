@@ -1,19 +1,22 @@
 pub mod auth;
 pub mod demo;
+pub mod scanner;
 pub mod state;
+pub mod workspace;
 
 use std::time::Duration;
 
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit, MatchedPath, Request, State},
-    http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
+    http::{header, HeaderName, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
 };
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use tower_http::{
     compression::CompressionLayer,
     services::{ServeDir, ServeFile},
@@ -28,13 +31,34 @@ struct HealthResponse {
     build_sha: String,
 }
 
+#[derive(Serialize)]
+struct ReadyResponse {
+    status: &'static str,
+    database: &'static str,
+    malware_scanner: &'static str,
+}
+
 pub fn app(state: AppState) -> Router {
     let index = state.dist_dir.join("index.html");
     let static_files = ServeDir::new(state.dist_dir.clone()).fallback(ServeFile::new(index));
 
     Router::new()
         .route("/health", get(health))
-        .route("/api/v1/me", get(me))
+        .route("/ready", get(ready))
+        .route("/api/v1/me", get(workspace::me))
+        .route(
+            "/api/v1/staff/workspace",
+            get(workspace::get_workspace).post(workspace::create_workspace),
+        )
+        .route("/api/v1/staff/actions", post(workspace::create_action))
+        .route(
+            "/api/v1/staff/actions/{id}/publish",
+            post(workspace::publish_link),
+        )
+        .route(
+            "/api/v1/staff/actions/{id}/reminder",
+            post(workspace::schedule_reminder),
+        )
         .route("/api/v1/demo/sessions", post(demo::create_session))
         .route("/api/v1/demo/session/ensure", post(demo::ensure_session))
         .route("/api/v1/demo/session", delete(demo::destroy_session))
@@ -88,21 +112,38 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
-async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, demo::ApiError> {
-    let claims = state.auth.verify(&headers).await?;
-    let (session_id, _) = demo::provision_staff(&state, &claims.oid).await?;
-    let cookie = demo::demo_cookie(&session_id, &headers, 2_592_000);
-    let mut response = Json(serde_json::json!({
-        "id": claims.oid,
-        "name": claims.name,
-        "email": claims.email
-    }))
-    .into_response();
-    response.headers_mut().append(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).map_err(|_| demo::ApiError::internal())?,
-    );
-    Ok(response)
+async fn ready(State(state): State<AppState>) -> Response {
+    let database_ready = sqlx::query_scalar::<_, i64>("SELECT 1")
+        .fetch_one(&state.pool)
+        .await
+        .is_ok();
+    let scanner_ready = state.scanner.available().await;
+    let status = if database_ready && scanner_ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status,
+        Json(ReadyResponse {
+            status: if status.is_success() {
+                "ready"
+            } else {
+                "degraded"
+            },
+            database: if database_ready {
+                "ready"
+            } else {
+                "unavailable"
+            },
+            malware_scanner: if scanner_ready {
+                "ready"
+            } else {
+                "unavailable"
+            },
+        }),
+    )
+        .into_response()
 }
 
 async fn security_and_rate_limit(
@@ -116,11 +157,23 @@ async fn security_and_rate_limit(
         .get::<MatchedPath>()
         .map(|matched| matched.as_str().to_owned())
         .unwrap_or_else(|| path.clone());
-    if path != "/health" {
-        let ip = client_ip(request.headers());
+    let has_visitor_cookie = cookie_value(request.headers(), "car_visitor").is_some();
+    let local_host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|host| host.starts_with("localhost") || host.starts_with("127.0.0.1"));
+    if !matches!(path.as_str(), "/health" | "/ready") {
         let (bucket, allowance, window) = rate_policy(request.method().as_str(), &path);
-        let key = format!("{ip}:{bucket}");
-        if let Err(retry_after) = state.limiter.check(key, allowance, window) {
+        let retry_after = rate_identities(request.headers(), &path)
+            .into_iter()
+            .find_map(|identity| {
+                state
+                    .limiter
+                    .check(format!("{identity}:{bucket}"), allowance, window)
+                    .err()
+            });
+        if let Some(retry_after) = retry_after {
             let mut response = (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(serde_json::json!({
@@ -160,6 +213,15 @@ async fn security_and_rate_limit(
     if response.status().is_success() && is_html && !known_html_route {
         *response.status_mut() = StatusCode::NOT_FOUND;
     }
+    if is_html && !has_visitor_cookie {
+        let visitor = uuid::Uuid::now_v7();
+        if let Ok(value) = HeaderValue::from_str(&format!(
+            "car_visitor={visitor}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000{}",
+            if local_host { "" } else { "; Secure" }
+        )) {
+            response.headers_mut().append(header::SET_COOKIE, value);
+        }
+    }
     add_security_headers(response.headers_mut(), &path);
     info!(
         method = %method,
@@ -171,21 +233,72 @@ async fn security_and_rate_limit(
     response
 }
 
-fn client_ip(headers: &axum::http::HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
+fn rate_identities(headers: &axum::http::HeaderMap, path: &str) -> Vec<String> {
+    let mut identities = Vec::new();
+    let mut has_product_cookie = false;
+    for name in ["car_visitor", "car_demo", "car_client"] {
+        if let Some(value) = cookie_value(headers, name) {
+            identities.push(format!("cookie:{value}"));
+            has_product_cookie = true;
+            break;
+        }
+    }
+    let bearer = headers
+        .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("direct")
-        .chars()
-        .take(64)
-        .collect()
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|value| !value.is_empty());
+    let has_bearer = bearer.is_some();
+    if let Some(value) = bearer {
+        identities.push(format!("bearer:{}", hex::encode(Sha256::digest(value))));
+    }
+    for name in ["x-azure-clientip", "x-real-ip", "x-forwarded-for"] {
+        let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) else {
+            continue;
+        };
+        let hops: Vec<_> = value
+            .split(',')
+            .map(str::trim)
+            .filter(|hop| !hop.is_empty())
+            .collect();
+        if let Some(first) = hops.first() {
+            identities.push(format!(
+                "{name}:{}",
+                first.chars().take(64).collect::<String>()
+            ));
+        }
+        if let Some(last) = (hops.len() > 1).then(|| hops[hops.len() - 1]) {
+            identities.push(format!(
+                "{name}:{}",
+                last.chars().take(64).collect::<String>()
+            ));
+        }
+    }
+    if identities.is_empty() || (path.starts_with("/api/") && !has_product_cookie && !has_bearer) {
+        identities.push("anonymous-no-cookie".into());
+    }
+    identities
+}
+
+fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';').find_map(|cookie| {
+                let (cookie_name, value) = cookie.trim().split_once('=')?;
+                (cookie_name == name).then(|| value.chars().take(80).collect())
+            })
+        })
 }
 
 fn rate_policy(method: &str, path: &str) -> (&'static str, usize, Duration) {
-    if method == "POST" && matches!(path, "/api/v1/demo/sessions" | "/api/v1/demo/session/reset") {
+    if method == "POST"
+        && matches!(
+            path,
+            "/api/v1/demo/sessions" | "/api/v1/demo/session/ensure" | "/api/v1/demo/session/reset"
+        )
+    {
         ("demo-session", 3, Duration::from_secs(60))
     } else if method == "POST" && path == "/api/v1/client-links/exchange" {
         ("link-exchange", 10, Duration::from_secs(60))
@@ -307,5 +420,32 @@ mod tests {
         }
         let response = limited.expect("the burst allowance must be enforced");
         assert!(response.headers().contains_key(header::RETRY_AFTER));
+    }
+
+    #[tokio::test]
+    async fn anonymous_session_creation_cannot_bypass_limits_by_changing_forwarded_ip() {
+        let router = app(test_state().await);
+        for attempt in 0..4 {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/demo/sessions")
+                        .header("host", "localhost:4173")
+                        .header("x-forwarded-for", format!("203.0.113.{attempt}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            if attempt < 3 {
+                assert_eq!(response.status(), StatusCode::CREATED);
+            } else {
+                assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+                assert!(response.headers().contains_key(header::RETRY_AFTER));
+            }
+        }
     }
 }

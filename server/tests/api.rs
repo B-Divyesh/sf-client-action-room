@@ -59,6 +59,35 @@ async fn send(
         .unwrap()
 }
 
+async fn send_auth(
+    router: axum::Router,
+    method: &str,
+    uri: &str,
+    oid: &str,
+    body: Option<Value>,
+) -> Response {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("host", "localhost:4173")
+        .header(header::AUTHORIZATION, format!("Bearer test:{oid}"));
+    if body.is_some() {
+        builder = builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("idempotency-key", format!("request-{oid}-0001"));
+    }
+    router
+        .oneshot(
+            builder
+                .body(Body::from(
+                    body.map(|value| value.to_string()).unwrap_or_default(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
 async fn json_body(response: Response) -> Value {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
@@ -77,7 +106,7 @@ fn cookie(response: &Response, name: &str) -> String {
 }
 
 #[tokio::test]
-async fn demo_sessions_are_isolated_and_reset_reseeds() {
+async fn workspaces_are_isolated_and_reset_reseeds() {
     let state = state().await;
     let router = app(state.clone());
     let first = send(
@@ -183,7 +212,7 @@ async fn grant_exchange_submission_and_audit_are_scoped_and_idempotent() {
         .nth(1)
         .unwrap();
 
-    let stored: String = sqlx::query("SELECT token_digest FROM demo_grants LIMIT 1")
+    let stored: String = sqlx::query("SELECT token_digest FROM client_grants LIMIT 1")
         .fetch_one(&state.pool)
         .await
         .unwrap()
@@ -323,19 +352,65 @@ async fn staff_identity_rejects_missing_and_untrusted_tokens() {
 #[tokio::test]
 async fn staff_workspace_is_stable_for_oid_and_isolated_from_another_oid() {
     let state = state().await;
-    let (first_id, first_queue) = client_action_room_api::demo::provision_staff(&state, "oid-one")
-        .await
-        .unwrap();
-    let (same_id, _) = client_action_room_api::demo::provision_staff(&state, "oid-one")
-        .await
-        .unwrap();
-    let (other_id, other_queue) = client_action_room_api::demo::provision_staff(&state, "oid-two")
-        .await
-        .unwrap();
-    assert_eq!(first_id, same_id);
-    assert_ne!(first_id, other_id);
-    assert_eq!(first_queue.actions.len(), 4);
-    assert_eq!(other_queue.actions.len(), 4);
+    let router = app(state.clone());
+    let absent = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/workspace",
+        "oid-one",
+        None,
+    )
+    .await;
+    assert_eq!(absent.status(), StatusCode::NOT_FOUND);
+
+    let created = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/workspace",
+        "oid-one",
+        Some(json!({
+            "firm_name": "River & Pine",
+            "client_label": "March launch",
+            "client_actor": "Ari Kim"
+        })),
+    )
+    .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = json_body(created).await;
+    assert_eq!(created["namespace"], "real");
+    assert_eq!(created["firm"], "River & Pine");
+    assert_eq!(created["workspace"], "March launch");
+    assert_eq!(created["actions"].as_array().unwrap().len(), 0);
+
+    let approval = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/actions",
+        "oid-one",
+        Some(json!({
+            "title": "Approve the launch copy",
+            "instructions": "Check the three headings.",
+            "due_at": "2026-08-29T14:00:00Z"
+        })),
+    )
+    .await;
+    assert_eq!(approval.status(), StatusCode::CREATED);
+
+    let same = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/workspace",
+        "oid-one",
+        None,
+    )
+    .await;
+    assert_eq!(
+        json_body(same).await["actions"].as_array().unwrap().len(),
+        1
+    );
+
+    let other = send_auth(router, "GET", "/api/v1/staff/workspace", "oid-two", None).await;
+    assert_eq!(other.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -351,6 +426,18 @@ async fn reversible_migration_removes_demo_schema() {
         .unwrap();
     sqlx::raw_sql(include_str!(
         "../migrations/202608280002_action_types.up.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/202609050003_real_workspaces.up.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/202609050003_real_workspaces.down.sql"
     ))
     .execute(&pool)
     .await
@@ -449,9 +536,19 @@ async fn successful_mutation_can_be_snapshotted_and_restored() {
         Some(live_path),
         Some(snapshot_path.clone()),
     );
-    let _ = client_action_room_api::demo::provision_staff(&state, "durable-oid")
-        .await
-        .unwrap();
+    let response = send_auth(
+        app(state.clone()),
+        "POST",
+        "/api/v1/staff/workspace",
+        "durable-oid",
+        Some(json!({
+            "firm_name": "Durable Firm",
+            "client_label": "Durable Client",
+            "client_actor": "Dana"
+        })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
     state.persist_snapshot().await.unwrap();
     assert!(snapshot_path.exists());
 
@@ -462,7 +559,7 @@ async fn successful_mutation_can_be_snapshotted_and_restored() {
         .await
         .unwrap();
     let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM staff_workspaces WHERE entra_oid = 'durable-oid'")
+        sqlx::query_scalar("SELECT COUNT(*) FROM organizations WHERE owner_oid = 'durable-oid'")
             .fetch_one(&restored)
             .await
             .unwrap();

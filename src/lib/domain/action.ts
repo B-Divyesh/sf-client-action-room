@@ -23,6 +23,7 @@ export interface AuditEvent {
 }
 
 export interface DemoQueue {
+  namespace: 'demo' | 'real';
   firm: string;
   workspace: string;
   staff_owner: string;
@@ -44,6 +45,7 @@ export interface Submission {
 }
 
 export interface ClientAction {
+  namespace: 'demo' | 'real';
   firm: string;
   workspace: string;
   client_actor: string;
@@ -97,14 +99,14 @@ export function validateApproval(
 }
 
 export function formatEventName(event: AuditEvent): string {
-  if (event.event_name === 'action_created') return 'Approval action created';
+  if (event.event_name === 'action_created') return 'Action created';
   if (event.event_name === 'deadline_set') return 'Deadline set';
   if (event.event_name === 'client_link_issued') return 'Client link issued';
   if (event.event_name === 'client_decision_recorded') {
     return event.decision === 'approved' ? 'Approval recorded' : 'Changes requested';
   }
   if (event.event_name === 'client_choice_recorded') return 'Choice recorded';
-  if (event.event_name === 'client_file_scanned') return 'File received and scanned';
+  if (event.event_name === 'client_file_scanned') return 'File received and malware-scanned';
   if (event.event_name === 'external_link_opened') return 'External link opened';
   if (event.event_name === 'reminder_scheduled') return 'Reminder scheduled';
   if (event.event_name.endsWith('_link_issued')) return 'Client link issued';

@@ -8,6 +8,7 @@ use std::{
 };
 
 use crate::auth::AuthService;
+use crate::scanner::MalwareScanner;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
@@ -21,6 +22,7 @@ pub struct AppState {
     pub fixed_now: Option<DateTime<Utc>>,
     pub dist_dir: PathBuf,
     pub auth: AuthService,
+    pub scanner: MalwareScanner,
     database_path: Option<PathBuf>,
     persist_path: Option<PathBuf>,
 }
@@ -62,6 +64,8 @@ impl AppState {
         );
 
         let mut state = Self::new(build_sha, pool, fixed_now, dist_dir);
+        state.auth = AuthService::from_env();
+        state.scanner = MalwareScanner::from_env();
         state.database_path = database_path;
         state.persist_path = persist_path;
         state.persist_snapshot().await?;
@@ -91,7 +95,8 @@ impl AppState {
             limiter: RateLimiter::default(),
             fixed_now,
             dist_dir,
-            auth: AuthService::from_env(),
+            auth: AuthService::for_tests(),
+            scanner: MalwareScanner::fixture(),
             database_path,
             persist_path,
         }
@@ -102,10 +107,11 @@ impl AppState {
     }
 
     pub async fn purge_expired(&self) -> Result<u64, sqlx::Error> {
-        let result = sqlx::query("DELETE FROM demo_sessions WHERE expires_at <= ?")
-            .bind(self.now().to_rfc3339())
-            .execute(&self.pool)
-            .await?;
+        let result =
+            sqlx::query("DELETE FROM workspaces WHERE namespace = 'demo' AND expires_at <= ?")
+                .bind(self.now().to_rfc3339())
+                .execute(&self.pool)
+                .await?;
         Ok(result.rows_affected())
     }
 

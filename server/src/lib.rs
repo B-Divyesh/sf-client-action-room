@@ -234,13 +234,9 @@ async fn security_and_rate_limit(
 }
 
 fn rate_identities(headers: &axum::http::HeaderMap, path: &str) -> Vec<String> {
-    let mut identities = Vec::new();
-    let mut has_product_cookie = false;
     for name in ["car_visitor", "car_demo", "car_client"] {
         if let Some(value) = cookie_value(headers, name) {
-            identities.push(format!("cookie:{value}"));
-            has_product_cookie = true;
-            break;
+            return vec![format!("cookie:{value}")];
         }
     }
     let bearer = headers
@@ -248,10 +244,10 @@ fn rate_identities(headers: &axum::http::HeaderMap, path: &str) -> Vec<String> {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|value| !value.is_empty());
-    let has_bearer = bearer.is_some();
     if let Some(value) = bearer {
-        identities.push(format!("bearer:{}", hex::encode(Sha256::digest(value))));
+        return vec![format!("bearer:{}", hex::encode(Sha256::digest(value)))];
     }
+    let mut identities = Vec::new();
     for name in ["x-azure-clientip", "x-real-ip", "x-forwarded-for"] {
         let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) else {
             continue;
@@ -274,7 +270,7 @@ fn rate_identities(headers: &axum::http::HeaderMap, path: &str) -> Vec<String> {
             ));
         }
     }
-    if identities.is_empty() || (path.starts_with("/api/") && !has_product_cookie && !has_bearer) {
+    if identities.is_empty() || path.starts_with("/api/") {
         identities.push("anonymous-no-cookie".into());
     }
     identities
@@ -446,6 +442,29 @@ mod tests {
                 assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
                 assert!(response.headers().contains_key(header::RETRY_AFTER));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn separate_browser_visitors_do_not_share_the_strict_session_bucket() {
+        let router = app(test_state().await);
+        for visitor in 0..5 {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/demo/sessions")
+                        .header("host", "localhost:4173")
+                        .header("x-forwarded-for", "203.0.113.9")
+                        .header(header::COOKIE, format!("car_visitor=visitor-{visitor}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
         }
     }
 }

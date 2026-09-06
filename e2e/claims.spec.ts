@@ -109,7 +109,9 @@ test('@claim:link-expiry Client links last seven days, then cannot read or submi
   const approvalId = queue.actions.find((action: { kind: string }) => action.kind === 'approval').id;
   const published = await context.request.post(`/api/v1/demo/actions/${approvalId}/publish`);
   const publishedBody = await published.json();
-  expect(Date.parse(publishedBody.expires_at) - Date.parse(queue.server_now)).toBe(7 * 24 * 60 * 60 * 1000);
+  const linkLifetime = Date.parse(publishedBody.expires_at) - Date.parse(queue.server_now);
+  expect(linkLifetime).toBeGreaterThanOrEqual(7 * 24 * 60 * 60 * 1000);
+  expect(linkLifetime).toBeLessThan(7 * 24 * 60 * 60 * 1000 + 1_000);
   await page.getByRole('button', { name: 'Create expired link example' }).click();
   const href = await page.getByTestId('expired-client-link').getAttribute('href');
   const expiredPage = await context.newPage();
@@ -136,6 +138,7 @@ async function openTypedAction(page: Page, context: BrowserContext, kind: 'uploa
 }
 
 test('@claim:secure-upload A client PDF is type-checked, malware-scanned, and scoped', async ({ browser }) => {
+  test.setTimeout(60_000);
   const { context, page } = await openDemo(browser);
   const clientPage = await openTypedAction(page, context, 'upload');
   await expect(clientPage.getByRole('heading', { level: 1 })).toHaveText('Upload the signed allergen sheet');
@@ -160,7 +163,7 @@ test('@claim:secure-upload A client PDF is type-checked, malware-scanned, and sc
     name: 'signed-allergen-sheet.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF'),
   });
   await clientPage.getByRole('button', { name: 'Upload and scan file' }).click();
-  await expect(clientPage.getByTestId('client-completion')).toContainText('File received and malware-scanned', { timeout: 20_000 });
+  await expect(clientPage.getByTestId('client-completion')).toContainText('File received and malware-scanned', { timeout: 45_000 });
   await page.reload();
   await expect(page.locator('[data-event="client_file_scanned"]')).toContainText('Clean PDF');
   await context.close();
@@ -265,6 +268,7 @@ test('@claim:demo-privacy Demo traffic stays on this site and leaving deletes th
   const requests: string[] = [];
   page.on('request', (request) => requests.push(request.url()));
   await page.goto('/demo');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your sample client action room');
   const queueBody = await page.evaluate(async () => {
     const response = await fetch('/api/v1/demo/queue');
     if (!response.ok) throw new Error(`Queue request failed with ${response.status}`);

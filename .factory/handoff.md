@@ -95,3 +95,66 @@ The catalog description is a verb-first 93-character line and is copied to `/wor
 Independent verification reviewed implementation `b059adf1d4b08f755a2d1a08d3a77e2052586648` and the later documentation commit `d4dd83acf0fea73c3da8b04274b4cf64d35f9547`. The live assets exactly matched a fresh candidate build; the live health build id was the documentation SHA.
 
 The verifier passed all local gates, all 13 declared claim commands, the live public browser suite, accessibility checks, rate limits, and a live restart-persistence check. The verdict is nevertheless **FAIL** in `.factory/verification-3.md`: three public claims lack observable tagged tests (the 5 MB upload boundary, 24-hour uploaded-file expiry, and no-email demo reminders). M1 must not be marked accepted until those claims are tested or removed/narrowed. M2 and external dependencies remain as listed above.
+
+## Repair 3 update — 2026-09-06 UTC
+
+### Result
+
+The three Verification 3 claim-coverage findings are repaired and deployed. M1 is ready for fresh independent verification; it is not marked accepted by this handoff.
+
+- Deployed implementation SHA: `87e07dcd5a3b95eac9e1a71a1d42456614440757`
+- Later test-only commits: `21f91c4391b347f54d50f5006308355a75f648b1`, `9c176dd78c80ec5b2f105f12f42ff10e1847c784`
+- Live health: `{"status":"ok","build_sha":"87e07dcd5a3b95eac9e1a71a1d42456614440757"}`
+- Live readiness: database and malware scanner both report `ready`.
+
+### What changed
+
+- Added `upload-5mb-boundary`: a valid 5 MiB PDF completes a real fixture scan; an otherwise valid 5 MiB plus one byte PDF shows the size error.
+- Added `file-expiry`: a controlled local demo clock reads the uploaded bytes one second before 24 hours, advances to the exact boundary, purges expired records, and proves the same access cannot return bytes.
+- Added `demo-reminders-no-email`: scheduling records one reminder while the isolated delivery-status endpoint reports zero delivery-queue entries. The browser request log remains same-origin.
+- Added expiry cleanup for upload records and a staff-demo-only clean-file read endpoint. Files are served only while their demo workspace and 24-hour retention window are active.
+- Corrected the size recovery copy to say “no larger than 5 MB,” which matches an accepted exact-limit file.
+- Hardened the browser setup helpers to wait for the seeded action queue before direct demo API assertions. This fixes a live timing race without changing the deployed product behavior.
+
+### Verification
+
+From a clean dependency install:
+
+```sh
+npm ci
+npm run check
+npm test
+npm run test:e2e
+npm run build
+```
+
+- `npm run check` passed: Svelte diagnostics, rustfmt, and clippy have no errors or warnings.
+- `npm test` passed: 5 web tests, 6 Rust unit tests, and 8 Rust integration tests.
+- `npm run test:e2e` passed: 18/18 local browser tests.
+- `npm run build` passed and produced `dist/` plus the release server binary. Public JS is 28.91 KiB gzip and CSS is 4.91 KiB gzip.
+- Every one of the 16 commands declared in `.factory/claims.json` was run separately from this setup and passed.
+
+The three new claim commands and outcomes were:
+
+```sh
+npm run test:e2e -- --grep @claim:upload-5mb-boundary
+npm run test:e2e -- --grep @claim:file-expiry
+npm run test:e2e -- --grep @claim:demo-reminders-no-email
+```
+
+All three passed. The expiry check uses the local fixed clock only; production deliberately exposes no clock control.
+
+Against `https://client-action-room.sociobot.in`:
+
+```sh
+PLAYWRIGHT_BASE_URL=https://client-action-room.sociobot.in npm run test:e2e
+```
+
+The public suite passed with 16 public tests; the controlled-clock file-expiry test and the local-auth real-workspace fixture are intentionally skipped outside the local sandbox. The live suite exercised the exact 5 MiB scan boundary, reminder delivery-status boundary, desktop/phone accessibility smoke, keyboard/focus behavior, designed 404, route titles, same-origin traffic, and axe serious/critical checks. A fresh desktop and 390 px phone load showed the job, audience, and “Try it with sample data” before scrolling.
+
+### Known gaps and next steps
+
+- Fresh independent verification and strict review are still required before M1 acceptance.
+- M2 needs operator confirmation of the shared Entra callback and factory registration of recurring Sociobot prices/entitlement endpoints.
+- Real-workspace upload/choice/external-link authoring and actual transactional reminder delivery remain M3/M4 scope. Demo reminders intentionally never deliver mail.
+- The product makes no offline or update promise.

@@ -1,6 +1,6 @@
 # Client Action Room venture plan
 
-- Status: **M1 repair 2 deployed and verified; independent re-verification pending**
+- Status: **M1 repair 3 deployed; local and live candidate checks pass; independent re-verification pending**
 - Product: `client-action-room`
 - Artifact: web application with backend
 - Production URL: `https://client-action-room.sociobot.in`
@@ -408,7 +408,7 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 | Milestone | Status | Shippable outcome |
 |---|---|---|
-| M1 — Public site and approval demo | Repair 2 complete in source; live verification pending | A stranger can complete the sample, and a signed-in firm can start an empty durable approval workspace. |
+| M1 — Public site and approval demo | Repair 3 deployed; independent verification pending | A stranger can complete the sample, and a signed-in firm can start an empty durable approval workspace. |
 | M2 — Accounts, persistence, and subscriptions | Partial identity foundation only; subscriptions planned | A firm can sign in and return to an isolated workspace. |
 | M3 — Files, choices, and external links | Demo validation only; real workspace delivery planned | Clients can complete each action type through a scoped link. |
 | M4 — Reminders, records, and operations | Demo scheduling only; delivery and operations planned | Staff can schedule a reminder and inspect its audit event. |
@@ -416,7 +416,7 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 ### M1 — Public site and approval demo
 
-**Status:** Repair 2 complete in source on 2026-09-05. The live deployment and independent verification still must pass.
+**Status:** Repair 3 deployed on 2026-09-06. The local and live candidate checks pass; independent verification still must pass before M1 is accepted.
 
 **User outcome:** without an account, a visitor can use realistic sample data to experience the smallest complete action loop.
 

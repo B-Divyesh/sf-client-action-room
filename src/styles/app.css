@@ -19,7 +19,6 @@
 }
 
 html {
-  min-width: 20rem;
   scroll-behavior: smooth;
   background: var(--color-canvas);
   color: var(--color-text);
@@ -563,6 +562,10 @@ dd {
   align-items: start;
 }
 
+.staff-layout > * {
+  min-width: 0;
+}
+
 .deadline-rail,
 .detail-sheet,
 .audit-ledger {
@@ -1082,7 +1085,8 @@ footer {
     grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    justify-content: flex-start;
     border-top: 1px solid var(--color-rule);
   }
 
@@ -1111,6 +1115,7 @@ footer {
 
   .banner-actions {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: space-between;
   }
 

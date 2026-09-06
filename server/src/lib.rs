@@ -245,11 +245,16 @@ async fn security_and_rate_limit(
     response
 }
 
-fn rate_identities(headers: &axum::http::HeaderMap, path: &str) -> Vec<String> {
-    for name in ["car_visitor", "car_demo", "car_client"] {
-        if let Some(value) = cookie_value(headers, name) {
-            return vec![format!("cookie:{value}")];
-        }
+fn rate_identities(headers: &axum::http::HeaderMap, _path: &str) -> Vec<String> {
+    let mut identities = Vec::new();
+    let mut has_product_identity = false;
+
+    // A demo/client session rotates as the visitor creates a room or exchanges
+    // a link. It is useful for per-session limits but must never replace the
+    // visitor or ingress identity used for public abuse protection.
+    if let Some(value) = cookie_value(headers, "car_visitor") {
+        identities.push(format!("visitor:{value}"));
+        has_product_identity = true;
     }
     let bearer = headers
         .get(header::AUTHORIZATION)
@@ -257,35 +262,46 @@ fn rate_identities(headers: &axum::http::HeaderMap, path: &str) -> Vec<String> {
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|value| !value.is_empty());
     if let Some(value) = bearer {
-        return vec![format!("bearer:{}", hex::encode(Sha256::digest(value)))];
+        identities.push(format!("bearer:{}", hex::encode(Sha256::digest(value))));
+        has_product_identity = true;
     }
-    let mut identities = Vec::new();
-    for name in ["x-azure-clientip", "x-real-ip", "x-forwarded-for"] {
-        let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) else {
-            continue;
-        };
-        let hops: Vec<_> = value
-            .split(',')
-            .map(str::trim)
-            .filter(|hop| !hop.is_empty())
-            .collect();
-        if let Some(first) = hops.first() {
-            identities.push(format!(
-                "{name}:{}",
-                first.chars().take(64).collect::<String>()
-            ));
-        }
-        if let Some(last) = (hops.len() > 1).then(|| hops[hops.len() - 1]) {
-            identities.push(format!(
-                "{name}:{}",
-                last.chars().take(64).collect::<String>()
-            ));
+
+    for name in ["car_demo", "car_client"] {
+        if let Some(value) = cookie_value(headers, name) {
+            identities.push(format!("session:{name}:{value}"));
         }
     }
-    if identities.is_empty() || path.starts_with("/api/") {
-        identities.push("anonymous-no-cookie".into());
+
+    if let Some(identity) = forwarded_identity(headers) {
+        identities.push(identity);
     }
+
+    // Direct API callers do not receive the visitor cookie issued on an HTML
+    // response. Keep a fallback bucket until they present a stable identity so
+    // a newly issued session cookie cannot reset their allowance.
+    if !has_product_identity {
+        identities.push("anonymous-no-stable-client".into());
+    }
+
+    identities.sort();
+    identities.dedup();
     identities
+}
+
+fn forwarded_identity(headers: &axum::http::HeaderMap) -> Option<String> {
+    // The factory ingress supplies the real client as the first forwarded hop.
+    // Do not prefer other client-controlled forwarding headers over it.
+    let value = headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())?;
+    let first_hop = value
+        .split(',')
+        .map(str::trim)
+        .find(|hop| !hop.is_empty())?;
+    Some(format!(
+        "ip:{}",
+        first_hop.chars().take(64).collect::<String>()
+    ))
 }
 
 fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
@@ -458,25 +474,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn separate_browser_visitors_do_not_share_the_strict_session_bucket() {
+    async fn rotating_demo_session_cookies_cannot_bypass_the_ip_allowance() {
         let router = app(test_state().await);
-        for visitor in 0..5 {
+        let mut demo_cookie = None;
+        for attempt in 0..5 {
+            let mut request = Request::builder()
+                .method("POST")
+                .uri("/api/v1/demo/sessions")
+                .header("host", "localhost:4173")
+                .header("x-forwarded-for", "203.0.113.9")
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(cookie) = &demo_cookie {
+                request = request.header(header::COOKIE, cookie);
+            }
             let response = router
                 .clone()
-                .oneshot(
-                    Request::builder()
-                        .method("POST")
-                        .uri("/api/v1/demo/sessions")
-                        .header("host", "localhost:4173")
-                        .header("x-forwarded-for", "203.0.113.9")
-                        .header(header::COOKIE, format!("car_visitor=visitor-{visitor}"))
-                        .header(header::CONTENT_TYPE, "application/json")
-                        .body(Body::from("{}"))
-                        .unwrap(),
-                )
+                .oneshot(request.body(Body::from("{}")).unwrap())
                 .await
                 .unwrap();
-            assert_eq!(response.status(), StatusCode::CREATED);
+            if attempt < 3 {
+                assert_eq!(response.status(), StatusCode::CREATED);
+                demo_cookie = response
+                    .headers()
+                    .get_all(header::SET_COOKIE)
+                    .iter()
+                    .filter_map(|value| value.to_str().ok())
+                    .find(|value| value.starts_with("car_demo="))
+                    .and_then(|value| value.split(';').next())
+                    .map(str::to_owned);
+                assert!(demo_cookie.is_some());
+            } else {
+                assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+                assert!(response.headers().contains_key(header::RETRY_AFTER));
+            }
         }
     }
 }

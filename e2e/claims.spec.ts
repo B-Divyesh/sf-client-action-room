@@ -440,6 +440,19 @@ test('mobile, keyboard, routing, accessibility, and request privacy smoke', asyn
   await context.close();
 });
 
+test('200% phone text sizing reflows the demo without horizontal page scroll', async ({ browser }) => {
+  const { context, page } = await openDemo(browser, true);
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '200%';
+  });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+    .toBe(true);
+  await expect(page.getByRole('button', { name: 'Reset demo' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start for real' })).toBeVisible();
+  await context.close();
+});
+
 test('staff workspace uses the CIAM boundary and remains keyboard accessible', async ({ browser }) => {
   const context = await freshContext(browser, true);
   const page = await context.newPage();

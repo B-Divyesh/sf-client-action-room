@@ -194,6 +194,7 @@ M1 repair 4 is implemented, pushed, deployed, and ready for fresh independent ve
 
 - Deployed implementation SHA: `4c7ede4443be1866d1b0042925e87c7757394028`
 - Supporting repair SHA: `3ec1c927019557ddc83d7524467c48e99a8ea72b`
+- Documentation and verification-evidence SHA: `3cce8efefa921a8e1de4eccb4c54d2711fabd2fa`
 - Live health: `{"status":"ok","build_sha":"4c7ede4443be1866d1b0042925e87c7757394028"}`
 - Live readiness: database and malware scanner both report `ready`.
 

@@ -12,6 +12,7 @@ async function openDemo(browser: Browser, mobile = false) {
   const page = await context.newPage();
   await page.goto('/demo');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your sample client action room');
+  await expect(page.locator('.action-slip')).toHaveCount(4);
   return { context, page };
 }
 

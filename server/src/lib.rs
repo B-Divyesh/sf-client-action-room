@@ -272,14 +272,13 @@ fn rate_identities(headers: &axum::http::HeaderMap, _path: &str) -> Vec<String> 
         }
     }
 
-    if let Some(identity) = forwarded_identity(headers) {
-        identities.push(identity);
-    }
-
     // Direct API callers do not receive the visitor cookie issued on an HTML
     // response. Keep a fallback bucket until they present a stable identity so
     // a newly issued session cookie cannot reset their allowance.
     if !has_product_identity {
+        if let Some(identity) = forwarded_identity(headers) {
+            identities.push(identity);
+        }
         identities.push("anonymous-no-stable-client".into());
     }
 
@@ -474,7 +473,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rotating_demo_session_cookies_cannot_bypass_the_ip_allowance() {
+    async fn rotating_demo_session_cookies_cannot_bypass_the_stable_allowance() {
         let router = app(test_state().await);
         let mut demo_cookie = None;
         for attempt in 0..5 {
@@ -507,6 +506,29 @@ mod tests {
                 assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
                 assert!(response.headers().contains_key(header::RETRY_AFTER));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn separate_visitor_cookies_have_independent_demo_session_allowances() {
+        let router = app(test_state().await);
+        for visitor in 0..5 {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/demo/sessions")
+                        .header("host", "localhost:4173")
+                        .header("x-forwarded-for", "203.0.113.9")
+                        .header(header::COOKIE, format!("car_visitor=visitor-{visitor}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
         }
     }
 }

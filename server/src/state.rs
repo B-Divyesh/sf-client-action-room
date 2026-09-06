@@ -3,7 +3,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant},
 };
 
@@ -19,7 +19,7 @@ pub struct AppState {
     pub build_sha: String,
     pub pool: SqlitePool,
     pub limiter: RateLimiter,
-    pub fixed_now: Option<DateTime<Utc>>,
+    fixed_now: Option<Arc<RwLock<DateTime<Utc>>>>,
     pub dist_dir: PathBuf,
     pub auth: AuthService,
     pub scanner: MalwareScanner,
@@ -93,7 +93,7 @@ impl AppState {
             build_sha: build_sha.into(),
             pool,
             limiter: RateLimiter::default(),
-            fixed_now,
+            fixed_now: fixed_now.map(|now| Arc::new(RwLock::new(now))),
             dist_dir,
             auth: AuthService::for_tests(),
             scanner: MalwareScanner::fixture(),
@@ -103,16 +103,36 @@ impl AppState {
     }
 
     pub fn now(&self) -> DateTime<Utc> {
-        self.fixed_now.unwrap_or_else(Utc::now)
+        self.fixed_now
+            .as_ref()
+            .map(|clock| *clock.read().expect("test clock lock poisoned"))
+            .unwrap_or_else(Utc::now)
+    }
+
+    pub fn has_test_clock(&self) -> bool {
+        self.fixed_now.is_some()
+    }
+
+    pub fn set_test_clock(&self, now: DateTime<Utc>) -> bool {
+        let Some(clock) = &self.fixed_now else {
+            return false;
+        };
+        *clock.write().expect("test clock lock poisoned") = now;
+        true
     }
 
     pub async fn purge_expired(&self) -> Result<u64, sqlx::Error> {
-        let result =
+        let now = self.now().to_rfc3339();
+        let expired_files = sqlx::query("DELETE FROM uploads WHERE expires_at <= ?")
+            .bind(&now)
+            .execute(&self.pool)
+            .await?;
+        let expired_workspaces =
             sqlx::query("DELETE FROM workspaces WHERE namespace = 'demo' AND expires_at <= ?")
-                .bind(self.now().to_rfc3339())
+                .bind(now)
                 .execute(&self.pool)
                 .await?;
-        Ok(result.rows_affected())
+        Ok(expired_files.rows_affected() + expired_workspaces.rows_affected())
     }
 
     pub async fn persist_snapshot(&self) -> Result<()> {

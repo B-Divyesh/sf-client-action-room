@@ -176,6 +176,17 @@ pub struct ReminderResponse {
     pub status: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DemoDeliveryStatus {
+    pub scheduled_reminders: i64,
+    pub delivery_queue_entries: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TestClockRequest {
+    now: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SubmissionRequest {
     actor_label: String,
@@ -747,7 +758,7 @@ pub async fn upload_file(
         ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_upload",
-            "Choose a PDF file under 5 MB.",
+            "Choose a PDF file no larger than 5 MB.",
         )
     })? {
         match field.name().unwrap_or_default() {
@@ -774,7 +785,7 @@ pub async fn upload_file(
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "unsafe_file_type",
-            "Upload one PDF file under 5 MB.",
+            "Upload one PDF file no larger than 5 MB.",
         ));
     }
     let scan_engine = match state.scanner.scan(&bytes).await {
@@ -819,6 +830,50 @@ pub async fn upload_file(
         occurred_at: now.to_rfc3339(),
         destination_url: None,
     }))
+}
+
+pub async fn download_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(action_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let workspace_id = valid_demo_session(&state, &headers).await?;
+    let row = sqlx::query(
+        "SELECT content, expires_at FROM uploads
+         WHERE workspace_id = ? AND action_id = ? AND scan_state = 'clean'
+         ORDER BY occurred_at DESC LIMIT 1",
+    )
+    .bind(&workspace_id)
+    .bind(&action_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "file_not_found",
+            "No clean file is available for this action.",
+        )
+    })?;
+    let expires_at: String = row.get("expires_at");
+    if parse_time(&expires_at)? <= state.now() {
+        return Err(ApiError::new(
+            StatusCode::GONE,
+            "file_expired",
+            "This file expired after 24 hours and is no longer available.",
+        ));
+    }
+    let content: Vec<u8> = row.get("content");
+    let mut response = content.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/pdf"),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_static("attachment; filename=\"uploaded-file.pdf\""),
+    );
+    Ok(response)
 }
 
 pub async fn record_external_visit(
@@ -912,6 +967,58 @@ pub async fn schedule_reminder(
         scheduled_for: scheduled.to_rfc3339(),
         status: "scheduled",
     }))
+}
+
+pub async fn demo_delivery_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<DemoDeliveryStatus>, ApiError> {
+    let workspace_id = valid_demo_session(&state, &headers).await?;
+    let scheduled_reminders: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM reminders WHERE workspace_id = ? AND status = 'scheduled'",
+    )
+    .bind(&workspace_id)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    let delivery_queue_entries: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM email_delivery_queue WHERE workspace_id = ?")
+            .bind(&workspace_id)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|_| ApiError::internal())?;
+    Ok(Json(DemoDeliveryStatus {
+        scheduled_reminders,
+        delivery_queue_entries,
+    }))
+}
+
+pub async fn set_test_clock(
+    State(state): State<AppState>,
+    Json(payload): Json<TestClockRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let now = parse_time(&payload.now).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_test_clock",
+            "Use an RFC 3339 test time.",
+        )
+    })?;
+    if !state.set_test_clock(now) {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "test_clock_unavailable",
+            "The test clock is unavailable.",
+        ));
+    }
+    let purged_records = state
+        .purge_expired()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    Ok(Json(serde_json::json!({
+        "server_now": state.now().to_rfc3339(),
+        "purged_records": purged_records,
+    })))
 }
 
 async fn scoped_client(

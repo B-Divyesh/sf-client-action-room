@@ -15,9 +15,12 @@ Try the deployed sample at <https://client-action-room.sociobot.in/demo>.
 - An approval records the decision, actor label, and server time.
 - Client links last seven days, then cannot read or submit the request.
 - A client PDF is type-checked, malware-scanned, and scoped.
+- A 5 MB client PDF is accepted; 5 MB plus one byte is rejected.
+- A clean uploaded file is available for 24 hours, then cannot be read.
 - A client can choose one listed option through a scoped link.
 - A client sees the destination before opening an HTTPS payment or booking link.
 - Staff can schedule one reminder and see its audit record.
+- Demo reminder schedules create no email delivery or queue entry.
 - A firm starts with an empty, isolated workspace that persists.
 - Demo traffic stays on this site, data lasts at most 24 hours, and leaving deletes the room.
 - Staff workspace requests reject missing and invalid access tokens.

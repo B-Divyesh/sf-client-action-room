@@ -437,6 +437,18 @@ async fn reversible_migration_removes_demo_schema() {
     .await
     .unwrap();
     sqlx::raw_sql(include_str!(
+        "../migrations/202609060004_demo_delivery_queue.up.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/202609060004_demo_delivery_queue.down.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
         "../migrations/202609050003_real_workspaces.down.sql"
     ))
     .execute(&pool)

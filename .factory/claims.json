@@ -56,6 +56,22 @@
     "sandbox": "fresh demo; publish only the upload action; assert an EICAR fixture is rejected, a PDF is accepted, and the clean result reaches the staff audit"
   },
   {
+    "id": "upload-5mb-boundary",
+    "milestone": "repair",
+    "claim": "A 5 MB client PDF is accepted and 5 MB plus one byte is rejected",
+    "where": "upload client action, README",
+    "test": "npm run test:e2e -- --grep @claim:upload-5mb-boundary",
+    "sandbox": "two fresh demos; submit a valid 5 MiB PDF and assert clean completion, then submit an otherwise valid 5 MiB plus one byte PDF and assert the visible size error"
+  },
+  {
+    "id": "file-expiry",
+    "milestone": "repair",
+    "claim": "A clean uploaded file is available for 24 hours, then cannot be read",
+    "where": "upload client action, README",
+    "test": "npm run test:e2e -- --grep @claim:file-expiry",
+    "sandbox": "fresh fixed-clock demo; upload a clean PDF, read its bytes one second before 24 hours, advance to exactly 24 hours, purge, and assert the same file access returns no bytes"
+  },
+  {
     "id": "choice-flow",
     "milestone": "repair",
     "claim": "A client can choose one listed option through a scoped link",
@@ -78,6 +94,14 @@
     "where": "demo action controls, README",
     "test": "npm run test:e2e -- --grep @claim:reminder-audit",
     "sandbox": "fresh demo; schedule a reminder for the open approval; assert the server time and staff actor appear in the audit"
+  },
+  {
+    "id": "demo-reminders-no-email",
+    "milestone": "repair",
+    "claim": "Demo reminder schedules create no email delivery or queue entry",
+    "where": "landing privacy statement, README",
+    "test": "npm run test:e2e -- --grep @claim:demo-reminders-no-email",
+    "sandbox": "fresh demo; schedule an approval reminder, assert one scheduled reminder and zero delivery-queue entries through the demo status API, and record only same-origin browser requests"
   },
   {
     "id": "real-workspace",

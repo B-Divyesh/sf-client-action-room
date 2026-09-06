@@ -360,7 +360,7 @@
 
   async function submitUpload(event: SubmitEvent) {
     event.preventDefault();
-    if (!client || !selectedFile) { formError = 'Choose one PDF file under 5 MB.'; return; }
+    if (!client || !selectedFile) { formError = 'Choose one PDF file no larger than 5 MB.'; return; }
     const form = new FormData();
     form.set('actor_label', actorLabel);
     form.set('file', selectedFile);
@@ -701,7 +701,7 @@
             <input id="upload-actor" maxlength="80" autocomplete="name" bind:value={actorLabel} required />
             <label for="client-file">Signed sheet (PDF, up to 5 MB)</label>
             <input id="client-file" type="file" accept="application/pdf,.pdf" required onchange={(event) => selectedFile = event.currentTarget.files?.[0] ?? null} />
-            <p class="legal-note">The server checks the file type and scans it for malware before recording it. Files expire within 24 hours.</p>
+            <p class="legal-note">The server checks the file type and scans it for malware before recording it. Files stay available for 24 hours.</p>
             <button class="button primary" type="submit" disabled={busy}>{busy ? 'Scanning file…' : 'Upload and scan file'}</button>
           </form>
         {:else}

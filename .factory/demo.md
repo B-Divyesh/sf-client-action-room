@@ -32,12 +32,12 @@ Use a fixed test clock in claim runs. Relative due dates are derived from seed t
 
 - The demo router cannot construct a production organization repository or query staff memberships.
 - Demo never sends email, creates billing checkout, writes production blobs, or calls the AI gateway.
-- Uploaded bytes enter a temporary quarantine file, are limited to 5 MB PDFs, and reach storage only after ClamAV returns clean.
+- Uploaded bytes enter a temporary quarantine file. A 5 MiB PDF is accepted, and one byte more is rejected. Clean bytes remain available for 24 hours, then are removed.
 - The container ships ClamAV signatures. A missing, failed, or timed-out scanner rejects the upload. Local claim tests use the complete EICAR fixture and a recorded clean result.
 - Browser contexts receive different namespaces; a guessed or copied session ID cannot cross cookies/grants.
 - Token/link flows use demo-only grants with the same permission logic as production, while persistence stays isolated.
 - Expired namespaces return a recoverable reset screen and reveal no prior content.
-- Purge runs at least hourly and deletes demo rows/objects no later than 24 hours.
+- Purge runs at least hourly and deletes expired upload bytes and demo rows/objects no later than 24 hours.
 - Rate limits apply by IP and demo session. Reset cannot be used to bypass the IP allowance.
 
 The demo claim tests in `.factory/claims.json` run from fresh browser contexts using only this entry and seed. Their fixed clock is `2026-08-28T14:00:00Z`; production derives the same relative deadlines from the live server clock.

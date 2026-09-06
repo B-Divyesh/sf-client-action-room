@@ -153,7 +153,7 @@ test('@claim:secure-upload A client PDF is type-checked, malware-scanned, and sc
     name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a PDF'),
   });
   await clientPage.getByRole('button', { name: 'Upload and scan file' }).click();
-  await expect(clientPage.getByRole('alert')).toContainText('Upload one PDF file under 5 MB');
+  await expect(clientPage.getByRole('alert')).toContainText('Upload one PDF file no larger than 5 MB');
   await clientPage.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
     name: 'unsafe.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\nX5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'),
   });
@@ -167,6 +167,72 @@ test('@claim:secure-upload A client PDF is type-checked, malware-scanned, and sc
   await page.reload();
   await expect(page.locator('[data-event="client_file_scanned"]')).toContainText('Clean PDF');
   await context.close();
+});
+
+test('@claim:upload-5mb-boundary A 5 MB client PDF is accepted and 5 MB plus one byte is rejected', async ({ browser }) => {
+  test.setTimeout(90_000);
+  const tooLarge = await openDemo(browser);
+  const tooLargeClient = await openTypedAction(tooLarge.page, tooLarge.context, 'upload');
+  const oneByteOver = Buffer.alloc(5 * 1024 * 1024 + 1);
+  oneByteOver.write('%PDF-1.4\n');
+  await tooLargeClient.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
+    name: 'one-byte-over.pdf', mimeType: 'application/pdf', buffer: oneByteOver,
+  });
+  await tooLargeClient.getByRole('button', { name: 'Upload and scan file' }).click();
+  await expect(tooLargeClient.getByRole('alert')).toContainText('Upload one PDF file no larger than 5 MB');
+  await tooLarge.context.close();
+
+  const exactLimit = await openDemo(browser);
+  const exactLimitClient = await openTypedAction(exactLimit.page, exactLimit.context, 'upload');
+  const exactlyFiveMegabytes = Buffer.alloc(5 * 1024 * 1024);
+  exactlyFiveMegabytes.write('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF');
+  await exactLimitClient.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
+    name: 'exactly-five-megabytes.pdf', mimeType: 'application/pdf', buffer: exactlyFiveMegabytes,
+  });
+  await exactLimitClient.getByRole('button', { name: 'Upload and scan file' }).click();
+  await expect(exactLimitClient.getByTestId('client-completion')).toContainText(
+    'File received and malware-scanned',
+    { timeout: 75_000 },
+  );
+  await exactLimit.context.close();
+});
+
+test('@claim:file-expiry A clean uploaded file is available for 24 hours, then cannot be read', async ({ browser }) => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_BASE_URL), 'The production demo does not expose a clock control.');
+  const fixedStart = '2026-08-28T14:00:00Z';
+  const { context, page } = await openDemo(browser);
+  try {
+    const queue = await (await context.request.get('/api/v1/demo/queue')).json();
+    const uploadId = queue.actions.find((action: { kind: string }) => action.kind === 'upload').id as string;
+    const clientPage = await openTypedAction(page, context, 'upload');
+    const file = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF');
+    await clientPage.getByLabel('Signed sheet (PDF, up to 5 MB)').setInputFiles({
+      name: 'retained-for-one-day.pdf', mimeType: 'application/pdf', buffer: file,
+    });
+    await clientPage.getByRole('button', { name: 'Upload and scan file' }).click();
+    await expect(clientPage.getByTestId('client-completion')).toContainText('File received and malware-scanned');
+
+    const justBeforeExpiry = await context.request.post('/api/v1/demo/test/clock', {
+      data: { now: '2026-08-29T13:59:59Z' },
+    });
+    expect(justBeforeExpiry.status()).toBe(200);
+    const available = await context.request.get(`/api/v1/demo/actions/${uploadId}/file`);
+    expect(available.status()).toBe(200);
+    expect(available.headers()['content-type']).toContain('application/pdf');
+    expect(await available.body()).toEqual(file);
+
+    const atExpiry = await context.request.post('/api/v1/demo/test/clock', {
+      data: { now: '2026-08-29T14:00:00Z' },
+    });
+    expect(atExpiry.status()).toBe(200);
+    expect((await atExpiry.json()).purged_records).toBeGreaterThanOrEqual(2);
+    const expired = await context.request.get(`/api/v1/demo/actions/${uploadId}/file`);
+    expect(expired.status()).toBe(410);
+    expect((await expired.json()).code).toBe('demo_expired');
+  } finally {
+    await context.request.post('/api/v1/demo/test/clock', { data: { now: fixedStart } });
+    await context.close();
+  }
 });
 
 test('@claim:choice-flow A client can choose one listed option through a scoped link', async ({ browser }) => {
@@ -198,6 +264,24 @@ test('@claim:reminder-audit Staff can schedule one reminder and see its audit re
   await approval.getByRole('button', { name: 'Schedule reminder' }).click();
   await expect(page.getByRole('status')).toContainText('Reminder scheduled');
   await expect(page.locator('[data-event="reminder_scheduled"]')).toContainText('Theo Grant');
+  await context.close();
+});
+
+test('@claim:demo-reminders-no-email Demo reminder schedules create no email delivery or queue entry', async ({ browser }) => {
+  const { context, page } = await openDemo(browser);
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(request.url()));
+  const approval = page.locator('.action-slip[data-kind="approval"]');
+  await approval.getByRole('button', { name: 'Schedule reminder' }).click();
+  await expect(page.getByRole('status')).toContainText('Reminder scheduled');
+  const deliveryStatus = await context.request.get('/api/v1/demo/reminders/delivery-status');
+  expect(deliveryStatus.status()).toBe(200);
+  expect(await deliveryStatus.json()).toEqual({
+    scheduled_reminders: 1,
+    delivery_queue_entries: 0,
+  });
+  const expectedOrigin = new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:4173').origin;
+  expect(requests.every((url) => new URL(url).origin === expectedOrigin)).toBe(true);
   await context.close();
 });
 

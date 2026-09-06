@@ -41,8 +41,9 @@ struct ReadyResponse {
 pub fn app(state: AppState) -> Router {
     let index = state.dist_dir.join("index.html");
     let static_files = ServeDir::new(state.dist_dir.clone()).fallback(ServeFile::new(index));
+    let test_clock_enabled = state.has_test_clock();
 
-    Router::new()
+    let router = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
         .route("/api/v1/me", get(workspace::me))
@@ -87,6 +88,7 @@ pub fn app(state: AppState) -> Router {
             "/api/v1/client/actions/{id}/upload",
             post(demo::upload_file),
         )
+        .route("/api/v1/demo/actions/{id}/file", get(demo::download_file))
         .route(
             "/api/v1/client/actions/{id}/visit",
             post(demo::record_external_visit),
@@ -95,14 +97,24 @@ pub fn app(state: AppState) -> Router {
             "/api/v1/demo/actions/{id}/reminder",
             post(demo::schedule_reminder),
         )
+        .route(
+            "/api/v1/demo/reminders/delivery-status",
+            get(demo::demo_delivery_status),
+        )
         .fallback_service(static_files)
         .layer(CompressionLayer::new())
         .layer(DefaultBodyLimit::max(5 * 1024 * 1024 + 16 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             security_and_rate_limit,
-        ))
-        .with_state(state)
+        ));
+
+    let router = if test_clock_enabled {
+        router.route("/api/v1/demo/test/clock", post(demo::set_test_clock))
+    } else {
+        router
+    };
+    router.with_state(state)
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {

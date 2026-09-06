@@ -1,6 +1,6 @@
 # Client Action Room venture plan
 
-- Status: **M1 accepted; M2 builder candidate complete with external CIAM callback and recurring-billing registration still pending**
+- Status: **M1 accepted; M2 deployed builder candidate complete with external CIAM callback and recurring-billing registration still pending**
 - Product: `client-action-room`
 - Artifact: web application with backend
 - Production URL: `https://client-action-room.sociobot.in`
@@ -409,7 +409,7 @@ Every milestone fits one focused builder session, ends in a deployable increment
 | Milestone | Status | Shippable outcome |
 |---|---|---|
 | M1 — Public site and approval demo | Accepted after independent verification 5 and strict review 2 | A stranger can complete the sample, and a signed-in firm can start an empty durable approval workspace. |
-| M2 — Accounts, persistence, and subscriptions | Builder candidate; recurring billing registration and live CIAM callback confirmation remain external | A firm can return to isolated durable workspaces and manage its records. |
+| M2 — Accounts, persistence, and subscriptions | Deployed builder candidate; recurring billing registration and live CIAM callback confirmation remain external | A firm can return to isolated durable workspaces and manage its records. |
 | M3 — Files, choices, and external links | Demo validation only; real workspace delivery planned | Clients can complete each action type through a scoped link. |
 | M4 — Reminders, records, and operations | Demo scheduling only; delivery and operations planned | Staff can schedule a reminder and inspect its audit event. |
 | M5 — Growth and integrations | Planned | Firms can import/share templates and connect action outcomes without turning the product into a project suite. |
@@ -447,7 +447,7 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 ### M2 — Accounts, persistence, and subscriptions
 
-**Status:** Builder candidate on 2026-09-06. Durable account data, role boundaries, retention, export, and deletion recovery are implemented. The shared Entra callback and recurring Sociobot offer are not yet externally confirmed, so checkout is not claimed or exposed as working.
+**Status:** Deployed builder candidate on 2026-09-06. Durable account data, role boundaries, retention, export, and deletion recovery are implemented and locally/live verified where the environment permits. The shared Entra callback round trip and recurring Sociobot offer are not yet externally confirmed, so checkout is not claimed or exposed as working. Fresh independent QA and strict review remain required for acceptance.
 
 **User outcome:** a firm owner can sign in, create a durable organization/workspace/action, share it, and start or manage a recurring plan.
 

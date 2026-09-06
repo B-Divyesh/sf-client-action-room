@@ -353,6 +353,7 @@ test('@claim:demo-privacy Demo traffic stays on this site and leaving deletes th
   page.on('request', (request) => requests.push(request.url()));
   await page.goto('/demo');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your sample client action room');
+  await expect(page.locator('.action-slip')).toHaveCount(4);
   const queueBody = await page.evaluate(async () => {
     const response = await fetch('/api/v1/demo/queue');
     if (!response.ok) throw new Error(`Queue request failed with ${response.status}`);

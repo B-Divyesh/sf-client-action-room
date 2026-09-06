@@ -239,3 +239,19 @@ Against `https://client-action-room.sociobot.in`:
 - The product makes no offline or update promise.
 
 The catalog description remains the 94-character verb-first description in `.factory/catalog-description.txt` and is copied to `/work/.evidence/catalog-description.txt`.
+
+## Verification 5 update — 2026-09-06 UTC
+
+Fresh independent verification **PASSed** M1 repair 4 with zero findings and zero untested declared claims. The full report is `.factory/verification-5.md`.
+
+- Reviewed implementation: `4c7ede4443be1866d1b0042925e87c7757394028`.
+- Reviewed documentation pointer: `7fa02cc606ff7e6e15dfe24137c15f1c5e8ee79f`. Its diff from the implementation changes only factory documentation; live `/health` reports this later documentation SHA and live public asset hashes match a fresh candidate build.
+- Clean documented gates passed: `npm ci`, `npm test` (5 web, 7 Rust unit, 8 Rust integration), `npm run check`, `npm run build`, and 19/19 local E2E tests.
+- Every one of the 16 declared claim commands passed separately. This includes exact 5 MiB acceptance and one-byte rejection, controlled 24-hour upload expiry, and a demo reminder status of one scheduled reminder with zero delivery-queue entries.
+- The live public suite passed 17 public tests. The controlled-clock expiry and local identity fixture are intentionally local-only and passed locally.
+- Fresh desktop and phone loads showed the job, audience, and sample action before scrolling. The sample had a persistent label and reset restored four realistic actions. At 390 px and 200% text, there was no horizontal scroll and both demo controls remained visible.
+- A direct rotating-`car_demo` probe returned `201, 201, 201, 429, 429`; both limited responses carried `Retry-After: 59`.
+- Live health and readiness passed. Local integration tests passed tenant isolation, a second app-instance session check, and snapshot/restore persistence. No live restart was initiated because this verifier has no restart authority.
+- The supplied URL verifier and Playwright axe scans across key routes at desktop and phone widths passed. `@axe-core/cli` could not locate a system Chrome binary; Playwright Chromium covered the same serious/critical axe check.
+
+M1 now awaits the separate strict review before acceptance. Current external dependencies and later M2–M4 scope are unchanged: Entra redirect confirmation and recurring billing registration; then membership/export/delete/retention/backups, real-workspace non-approval authoring, and opted-in transactional email. Demo reminders intentionally do not deliver email. The product makes no offline or update promise.

@@ -532,7 +532,9 @@
       demo = await api<DemoQueue>(route === 'demo' ? '/api/v1/demo/queue' : '/api/v1/staff/workspace', {
         headers: route !== 'demo' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
       });
-      notice = `Reminder scheduled for ${formatDate(result.scheduled_for)}.`;
+      notice = route === 'demo'
+        ? `Reminder scheduled for ${formatDate(result.scheduled_for)}.`
+        : `Reminder plan recorded for ${formatDate(result.scheduled_for)}.`;
     } catch (caught) { showError(caught); }
     finally { busy = false; }
   }
@@ -826,7 +828,7 @@
                 {:else}
                   <div class="button-row">
                     <button class="button primary compact" type="button" disabled={busy} onclick={() => publish(action)}>{action.kind === 'approval' ? 'Publish client link' : `Open ${action.kind === 'external_link' ? 'external' : action.kind} request`}</button>
-                    <button class="button secondary compact" type="button" disabled={busy} onclick={() => scheduleReminder(action)}>Schedule reminder</button>
+                    <button class="button secondary compact" type="button" disabled={busy} onclick={() => scheduleReminder(action)}>{route === 'demo' ? 'Schedule reminder' : 'Record reminder plan'}</button>
                   </div>
                 {/if}
               </li>

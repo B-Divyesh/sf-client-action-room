@@ -185,3 +185,56 @@ Strict review **FAILed** M1 repair 3 with two findings and zero untested claims.
 - Other checks passed: clean tests/check/build, live asset parity, health/readiness, first-screen clarity, four-action sample and reset, invalid/recovery focus, route/title/legal/404 checks, same-origin privacy, security headers, reduced motion, route axe scans, and Lighthouse 100/100/100/100.
 
 M1 is not accepted. Repair both findings, retain the 16 passing claim outcomes, then repeat fresh independent verification and strict review. External dependencies and later M2–M4 scope remain unchanged from the sections above.
+
+## Repair 4 update — 2026-09-06 UTC
+
+### Result
+
+M1 repair 4 is implemented, pushed, deployed, and ready for fresh independent verification and strict review. It is not marked accepted by this handoff.
+
+- Deployed implementation SHA: `4c7ede4443be1866d1b0042925e87c7757394028`
+- Supporting repair SHA: `3ec1c927019557ddc83d7524467c48e99a8ea72b`
+- Live health: `{"status":"ok","build_sha":"4c7ede4443be1866d1b0042925e87c7757394028"}`
+- Live readiness: database and malware scanner both report `ready`.
+
+### Strict-review findings repaired
+
+1. **P0 rotating `car_demo` cookies:** A rate decision now evaluates the stable server-issued visitor identity when present. Direct API callers that only receive rotating demo/client cookies retain a stable anonymous fallback and the first `X-Forwarded-For` identity. A rotating cookie cannot create a fresh write bucket. The regression follows each returned `car_demo` cookie and observes three `201` responses followed by two `429` responses with `Retry-After`. A separate response-outcome test proves independent server-issued visitor cookies retain their own allowance, so isolated browser demos do not throttle each other merely for sharing one ingress IP.
+2. **P1 200% phone text sizing:** Removed the scalable root minimum width, allowed mobile header/banner controls to wrap, and permitted staff-grid sheets to shrink in their single-column layout. A Playwright test changes the root text size to 200% at 390 px, proves no horizontal page scroll, and confirms both demo controls remain visible.
+
+### Verification
+
+From the documented dependency setup:
+
+```sh
+npm ci
+npm run check
+npm test
+npm run test:e2e
+npm run build
+```
+
+- `npm run check` passed: 0 Svelte errors/warnings, rustfmt, and clippy with warnings denied.
+- `npm test` passed: 5 web tests, 7 Rust unit tests, and 8 Rust integration tests; the Rust coverage includes the rotating-cookie regression.
+- `npm run test:e2e` passed: 19/19 local browser tests, including the 200% phone reflow check.
+- `npm run build` passed: public JavaScript is 28.91 KiB gzip and CSS is 4.91 KiB gzip.
+- Every one of the 16 commands in `.factory/claims.json` was run separately after the final repair; all passed. This includes the exact 5 MiB/one-byte-over upload boundary, controlled 24-hour file expiry, and zero-delivery demo reminder outcome.
+
+Against `https://client-action-room.sociobot.in`:
+
+- The public suite passed with 17 public tests. The controlled-clock file-expiry and local-auth real-workspace tests remain intentionally local-only and passed locally.
+- A direct fresh client that preserved each returned `car_demo` cookie received `201, 201, 201, 429, 429`; each limited response carried `Retry-After: 59`.
+- Fresh desktop (1280×900) and phone (390×844) contexts showed the job, audience, and “Try it with sample data” before scrolling. The one-click room showed four realistic actions, the persistent sample label, and reset restored the sample. The phone at 200% root text had no horizontal page scroll.
+- The supplied URL verifier passed on HTTPS with the expected title, `lang=en`, one H1, one main landmark, alt coverage, named buttons, and no console errors. Playwright axe scans across `/`, `/demo`, `/privacy`, `/terms`, `/workspace`, and the designed 404 route at desktop and phone widths found zero serious or critical issues and no horizontal overflow. The 404 returned its expected HTTP 404 status.
+- `@axe-core/cli` was attempted but could not locate a system Chrome binary in this container. The installed Playwright Chromium completed the equivalent route scans above.
+- Lighthouse produced 100 performance, accessibility, best-practices, and SEO; LCP was 1.4 s, CLS 0, and transfer weight 99 KiB. It emitted a non-fatal browser-tab-crash message after generating the report.
+- Live root headers include CSP with response-header `frame-ancestors 'none'`, HSTS, nosniff, no-referrer, Permissions Policy, and COOP.
+
+### Current milestone and remaining work
+
+- Current milestone: **M1 repair 4**. Fresh independent verification and strict review are the remaining acceptance gates.
+- External dependency: the operator must confirm the shared Entra callback registration. The factory must register the recurring Sociobot prices and entitlement contract before M2 billing.
+- Later work: M2 membership, export/delete, retention, subscription enforcement, and backup operations; M3 real-workspace authoring for upload, choice, and external-link actions; M3/M4 opted-in transactional reminder delivery. Demo reminders intentionally create no delivery entry.
+- The product makes no offline or update promise.
+
+The catalog description remains the 94-character verb-first description in `.factory/catalog-description.txt` and is copied to `/work/.evidence/catalog-description.txt`.

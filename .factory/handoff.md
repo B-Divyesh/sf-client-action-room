@@ -158,3 +158,18 @@ The public suite passed with 16 public tests; the controlled-clock file-expiry t
 - M2 needs operator confirmation of the shared Entra callback and factory registration of recurring Sociobot prices/entitlement endpoints.
 - Real-workspace upload/choice/external-link authoring and actual transactional reminder delivery remain M3/M4 scope. Demo reminders intentionally never deliver mail.
 - The product makes no offline or update promise.
+
+## Verification 4 update — 2026-09-06 UTC
+
+Fresh independent verification **PASSed** M1 repair 3 with zero findings and zero untested declared claims. The complete report is `.factory/verification-4.md`.
+
+- Candidate implementation reviewed: `87e07dcd5a3b95eac9e1a71a1d42456614440757`.
+- Documentation/report SHA reviewed: `b1e96e09fe403c15a2626e92a7603e51ecd1715a`.
+- Live `/health` reported the later documentation SHA; fresh local `dist` JS/CSS hashes matched the live assets exactly.
+- Clean local gates passed: `npm ci`, `npm test`, `npm run check`, `npm run build`, and 18/18 local E2E tests.
+- Every one of the 16 declared claim commands was independently run and passed. This includes exact 5 MiB acceptance/one-byte rejection, controlled 24-hour upload expiry, and demo reminder status with one scheduled reminder and zero delivery-queue entries.
+- The live public browser suite passed 16 tests; the controlled-clock expiry and local-auth fixture remain intentionally local-only and passed there.
+- Fresh live checks verified the one-click four-action sample, persistent demo label/reset, desktop and phone first screens, invalid/recovery messages and focus, health/readiness, a `201,201,201,429,429` session allowance with `Retry-After: 59`, route titles, legal routes, expected designed 404, same-origin product traffic, security headers, and asset parity.
+- The supplied URL verifier and Playwright axe scans passed at desktop and phone widths. `@axe-core/cli` itself could not locate a Chrome binary in this container; this was an environment limitation, while the installed Playwright Chromium scans found no serious or critical violations.
+
+M1 may now proceed to strict review/acceptance. Future work and external dependencies are unchanged: Entra redirect registration and recurring billing registration for M2; membership/export/delete/retention/backups in M2; and real-workspace non-approval action authoring plus actual opted-in reminder delivery in M3/M4. These are not presented as shipped M1 capabilities.

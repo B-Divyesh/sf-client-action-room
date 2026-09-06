@@ -255,3 +255,16 @@ Fresh independent verification **PASSed** M1 repair 4 with zero findings and zer
 - The supplied URL verifier and Playwright axe scans across key routes at desktop and phone widths passed. `@axe-core/cli` could not locate a system Chrome binary; Playwright Chromium covered the same serious/critical axe check.
 
 M1 now awaits the separate strict review before acceptance. Current external dependencies and later M2–M4 scope are unchanged: Entra redirect confirmation and recurring billing registration; then membership/export/delete/retention/backups, real-workspace non-approval authoring, and opted-in transactional email. Demo reminders intentionally do not deliver email. The product makes no offline or update promise.
+
+## Strict review 2 update — 2026-09-06 UTC
+
+Strict review 2 **PASSed** M1 repair 4 with **0 findings and 0 untested public claims**. The complete report is `.factory/review-2.md`; this accepts M1.
+
+- Reviewed implementation: `4c7ede4443be1866d1b0042925e87c7757394028`.
+- Reviewed documentation checkout: `f62225e561615f8aa8a18d54bda34904fa4e25bf`; live health reports the earlier documentation-only pointer `7fa02cc`. Fresh local JS and CSS hashes exactly match the live public assets, so the runtime remains the implementation candidate.
+- Clean gates passed after `npm ci`: `npm test` (5 web, 7 Rust unit, 8 Rust integration), `npm run check`, `npm run build`, and 19/19 local E2E tests. All 16 declared claim commands were run separately and passed.
+- The three repaired promises are independently recorded: a 5 MiB PDF passes while one extra byte fails; the controlled local clock serves bytes at 23:59:59 and denies them at 24:00:00; one demo reminder reports zero delivery-queue entries.
+- The live E2E suite passed 17 public tests. Its two intended local-only fixtures (controlled-clock file expiry and local test identity) passed locally. A rotating-cookie session probe received `201, 201, 201, 429, 429` with `Retry-After: 58` on both limited responses.
+- Fresh desktop and phone checks confirmed the job, audience, first sample action, four-action labelled/resettable sample, invalid-form recovery focus, 200% phone-text reflow without horizontal scroll, legal routes, expected designed 404, headers, and same-origin demo traffic. The supplied URL verifier and Playwright axe scans passed. `@axe-core/cli` could not locate a system Chrome binary; Playwright Chromium supplied the serious/critical axe coverage.
+
+M1 acceptance does not include future work. External dependencies remain shared-Entra callback registration and recurring billing registration for M2. M2 membership/export/delete/retention/backups, M3 real-workspace non-approval authoring, and M3/M4 opted-in transactional reminder delivery remain unshipped. The product makes no offline or update promise.

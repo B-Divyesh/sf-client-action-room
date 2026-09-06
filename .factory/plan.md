@@ -1,6 +1,6 @@
 # Client Action Room venture plan
 
-- Status: **M1 repair 4 deployed; local and live candidate checks pass; independent verification and strict review pending**
+- Status: **M1 accepted after independent verification 5 and strict review 2; M2 has not started**
 - Product: `client-action-room`
 - Artifact: web application with backend
 - Production URL: `https://client-action-room.sociobot.in`
@@ -408,7 +408,7 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 | Milestone | Status | Shippable outcome |
 |---|---|---|
-| M1 — Public site and approval demo | Repair 4 deployed; independent verification and strict review pending | A stranger can complete the sample, and a signed-in firm can start an empty durable approval workspace. |
+| M1 — Public site and approval demo | Accepted after independent verification 5 and strict review 2 | A stranger can complete the sample, and a signed-in firm can start an empty durable approval workspace. |
 | M2 — Accounts, persistence, and subscriptions | Partial identity foundation only; subscriptions planned | A firm can sign in and return to an isolated workspace. |
 | M3 — Files, choices, and external links | Demo validation only; real workspace delivery planned | Clients can complete each action type through a scoped link. |
 | M4 — Reminders, records, and operations | Demo scheduling only; delivery and operations planned | Staff can schedule a reminder and inspect its audit event. |
@@ -416,7 +416,7 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 ### M1 — Public site and approval demo
 
-**Status:** Repair 4 deployed on 2026-09-06. The local and live candidate checks pass; independent verification and strict review still must pass before M1 is accepted.
+**Status:** Accepted on 2026-09-06 after independent verification 5 and strict review 2. Future milestone scope remains unchanged.
 
 **User outcome:** without an account, a visitor can use realistic sample data to experience the smallest complete action loop.
 

@@ -22,6 +22,11 @@ This is the build contract for the municipal archive window system. The typed mi
 | `ChoiceField` | Captures one listed demo option | ready, invalid, submitting, complete | `fieldset`/radio semantics and clear validation | M1 repair |
 | `UploadTray` | Selects one demo PDF and shows its scan outcome | empty, selected, scanning, accepted, rejected | Native file input remains available; result announced | M1 repair |
 | `ReminderControl` | Records a reminder schedule without sending email | idle, scheduled, error | Schedule and result announced | M1 repair |
+| `AccountGate` | Starts shared-CIAM sign-in without a product password | signed-out, checking, error, signed-in | Status announced; sign-in and sign-out are ordinary buttons | M2 |
+| `FirmSettings` | Changes firm name, time zone, and record retention | ready, saving, saved, invalid | Bound labels; result and errors announced | M2 |
+| `MemberLedger` | Lists role-scoped staff and creates invitation links | owner, admin, member, limit-reached | Semantic list; role and expiry stated in words | M2 |
+| `DataControls` | Downloads a firm export and schedules/cancels deletion | ready, scheduled, cancelled, error | Exact-name confirmation; recovery action remains visible | M2 |
+| `BillingStatus` | Reports verified entitlement or external registration gap | unavailable, active, cancelled, expired | Status and paid period use text and exact dates | M2 |
 
 ## Shared component rules
 

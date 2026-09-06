@@ -1,0 +1,21 @@
+{
+  "slug": "client-action-room",
+  "name": "Client Action Room Starter",
+  "price_minor": 4900,
+  "currency": "USD",
+  "price_type": "subscription",
+  "interval": "month",
+  "return_url": "https://client-action-room.sociobot.in/app/billing",
+  "price_evidence": ".factory/brief.json monetization and .factory/plan.md pricing table",
+  "paid_features": [
+    "5 active client workspaces",
+    "3 staff seats",
+    "10 GB retained files",
+    "approval, upload, choice, and external-link actions",
+    "reminders",
+    "audit export"
+  ],
+  "license_validation_path": "/api/v1/billing/entitlement",
+  "registration_status": "required",
+  "notes": "Recurring checkout and entitlement verification must be registered by the billing operator before this offer is shown as purchasable."
+}

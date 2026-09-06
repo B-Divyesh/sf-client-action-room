@@ -7,7 +7,7 @@ export interface ComponentInventoryItem {
   readonly status: ComponentStatus;
 }
 
-/** Contract only. M1 implements the components marked for its routes. */
+/** Contract only. M1 and M2 implement the components marked for their routes. */
 export const componentInventory: readonly ComponentInventoryItem[] = [
   { name: 'ArchiveHeader', purpose: 'Global navigation and account context', states: ['public', 'signed-in', 'menu-open'], status: 'built' },
   { name: 'DemoBanner', purpose: 'Persistent sample-data boundary', states: ['active', 'resetting', 'reset-error'], status: 'built' },
@@ -26,5 +26,10 @@ export const componentInventory: readonly ComponentInventoryItem[] = [
   { name: 'ConfirmDialog', purpose: 'Confirms an irreversible or security-sensitive action', states: ['closed', 'open', 'busy', 'error'], status: 'planned' },
   { name: 'ArchiveSkeleton', purpose: 'Reserves layout during route and queue loading', states: ['queue', 'detail', 'settings'], status: 'built' },
   { name: 'EmptyDocket', purpose: 'Explains an empty queue and its next action', states: ['new-workspace', 'filtered', 'complete'], status: 'built' },
-  { name: 'PageShell', purpose: 'Provides skip link, landmarks, route focus, and footer', states: ['public', 'staff', 'client'], status: 'built' }
+  { name: 'PageShell', purpose: 'Provides skip link, landmarks, route focus, and footer', states: ['public', 'staff', 'client'], status: 'built' },
+  { name: 'AccountGate', purpose: 'Starts shared-CIAM staff sign-in', states: ['signed-out', 'checking', 'error', 'signed-in'], status: 'built' },
+  { name: 'FirmSettings', purpose: 'Changes firm and retention settings', states: ['ready', 'saving', 'saved', 'invalid'], status: 'built' },
+  { name: 'MemberLedger', purpose: 'Lists staff roles and creates invitation links', states: ['owner', 'admin', 'member', 'limit-reached'], status: 'built' },
+  { name: 'DataControls', purpose: 'Exports records and manages deletion recovery', states: ['ready', 'scheduled', 'cancelled', 'error'], status: 'built' },
+  { name: 'BillingStatus', purpose: 'Reports entitlement or registration status', states: ['unavailable', 'active', 'cancelled', 'expired'], status: 'built' },
 ] as const;

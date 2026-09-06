@@ -26,7 +26,7 @@ async function ready() {
 
 export async function beginStaffSignIn() {
   const app = await ready();
-  await app.loginRedirect({ scopes, redirectStartPage: `${window.location.origin}/workspace` });
+  await app.loginRedirect({ scopes, redirectStartPage: `${window.location.origin}/app` });
 }
 
 export async function finishStaffSignIn(): Promise<AccountInfo | null> {

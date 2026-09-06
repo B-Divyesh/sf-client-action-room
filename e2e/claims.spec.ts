@@ -347,6 +347,94 @@ test('@claim:real-workspace A firm starts with an empty, isolated workspace that
   await other.close();
 });
 
+test('@claim:firm-owner-controls Firm owners can choose retention, export their records, and cancel scheduled deletion', async ({ browser }) => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_BASE_URL), 'Test identities are disabled outside the local sandbox.');
+  const context = await freshContext(browser);
+  const ownerId = `m2-controls-${Date.now()}`;
+  const headers = { Authorization: `Bearer test:${ownerId}` };
+  const created = await context.request.post('/api/v1/staff/workspace', {
+    headers,
+    data: { firm_name: 'Juniper Works', client_label: 'Harbor launch', client_actor: 'Sam Lee' },
+  });
+  expect(created.status()).toBe(201);
+  const settings = await context.request.patch('/api/v1/staff/organization', {
+    headers,
+    data: { name: 'Juniper Works', time_zone: 'Europe/London', retention_days: 365 },
+  });
+  expect(settings.status()).toBe(200);
+  expect((await settings.json()).retention_days).toBe(365);
+
+  const unpaidInvitation = await context.request.post('/api/v1/staff/members/invitations', {
+    headers,
+    data: { role: 'member' },
+  });
+  expect(unpaidInvitation.status()).toBe(402);
+  expect((await unpaidInvitation.json()).code).toBe('seat_limit_reached');
+  const unpaidWorkspace = await context.request.post('/api/v1/staff/workspaces', {
+    headers,
+    data: { client_label: 'Second client', client_actor: 'Robin Patel' },
+  });
+  expect(unpaidWorkspace.status()).toBe(402);
+  expect((await unpaidWorkspace.json()).code).toBe('workspace_limit_reached');
+  const billing = await context.request.get('/api/v1/billing/entitlement', { headers });
+  expect(billing.status()).toBe(200);
+  expect(await billing.json()).toEqual({
+    available: false,
+    reason: 'recurring_billing_not_registered',
+    subscription: null,
+    export_available: true,
+  });
+
+  const exported = await context.request.get('/api/v1/staff/organization/export', { headers });
+  expect(exported.status()).toBe(200);
+  expect(exported.headers()['content-disposition']).toContain('client-action-room-export.json');
+  const exportBody = await exported.json();
+  expect(exportBody.format).toBe('client-action-room-export-v1');
+  expect(exportBody.organization.name).toBe('Juniper Works');
+  expect(exportBody.organization.workspaces).toHaveLength(1);
+
+  const scheduled = await context.request.delete('/api/v1/staff/organization', {
+    headers,
+    data: { confirmation: 'Juniper Works' },
+  });
+  expect(scheduled.status()).toBe(202);
+  const scheduledBody = await scheduled.json();
+  expect(Date.parse(scheduledBody.deletion_due_at) - Date.parse(exportBody.exported_at)).toBe(7 * 86_400_000);
+  const pendingDeletion = await context.request.get('/api/v1/staff/organization', { headers });
+  expect(pendingDeletion.status()).toBe(200);
+  expect((await pendingDeletion.json()).deletion_due_at).toBe(scheduledBody.deletion_due_at);
+  expect((await context.request.get('/api/v1/staff/workspace', { headers })).status()).toBe(404);
+  const cancelled = await context.request.post('/api/v1/staff/organization/deletion/cancel', { headers });
+  expect(cancelled.status()).toBe(200);
+  expect((await cancelled.json()).deletion_due_at).toBeNull();
+  expect((await context.request.get('/api/v1/staff/organization', { headers })).status()).toBe(200);
+  await context.close();
+});
+
+test('@claim:billing-registration-state Planned recurring prices are shown without offering unavailable checkout', async ({ browser }) => {
+  const context = await freshContext(browser);
+  const page = await context.newPage();
+  await page.goto('/');
+  const pricing = page.getByRole('region', { name: 'Planned recurring plans' });
+  await expect(pricing).toContainText('Starter · $49/month');
+  await expect(pricing).toContainText('Studio · $99/month');
+  await expect(pricing).toContainText('Checkout is not available until Sociobot registers these recurring offers.');
+  await expect(page.locator('a[href*="/checkout"]')).toHaveCount(0);
+
+  if (!process.env.PLAYWRIGHT_BASE_URL) {
+    const headers = { Authorization: `Bearer test:billing-state-${Date.now()}` };
+    const created = await context.request.post('/api/v1/staff/workspace', {
+      headers,
+      data: { firm_name: 'Billing Check Firm', client_label: 'First client', client_actor: 'Alex Rowan' },
+    });
+    expect(created.status()).toBe(201);
+    const billing = await context.request.get('/api/v1/billing/entitlement', { headers });
+    expect(billing.status()).toBe(200);
+    expect((await billing.json()).reason).toBe('recurring_billing_not_registered');
+  }
+  await context.close();
+});
+
 test('@claim:demo-privacy Demo traffic stays on this site and leaving deletes the room', async ({ browser }) => {
   const context = await freshContext(browser);
   const page = await context.newPage();
@@ -468,5 +556,19 @@ test('staff workspace uses the CIAM boundary and remains keyboard accessible', a
   const unauthorized = await context.request.get('/api/v1/me');
   expect(unauthorized.status()).toBe(401);
   expect(unauthorized.headers()['www-authenticate']).toBe('Bearer');
+  const protectedRoutes = [
+    ['/onboarding', 'Set up your firm — Client Action Room'],
+    ['/app', 'Action queue — Client Action Room'],
+    ['/app/workspaces/workspace-fixture/actions/new', 'New action — Client Action Room'],
+    ['/app/settings', 'Settings — Client Action Room'],
+    ['/app/billing', 'Plans — Client Action Room'],
+  ] as const;
+  for (const [path, title] of protectedRoutes) {
+    const response = await page.goto(path);
+    expect(response?.status()).toBe(200);
+    await expect(page).toHaveTitle(title);
+    await expect(page.locator('h1')).toHaveCount(1);
+    await expect(page.locator('main')).toHaveCount(1);
+  }
   await context.close();
 });

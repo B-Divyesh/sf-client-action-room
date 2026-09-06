@@ -59,7 +59,12 @@ describe('routing and components', () => {
   });
 
   it('keeps the venture component inventory explicit', () => {
-    expect(componentInventory).toHaveLength(18);
-    expect(componentInventory.filter(({ status }) => status === 'built').length).toBeGreaterThan(10);
+    const m2Components = ['AccountGate', 'FirmSettings', 'MemberLedger', 'DataControls', 'BillingStatus'];
+    expect(
+      componentInventory
+        .filter(({ name }) => m2Components.includes(name))
+        .map(({ name, status }) => [name, status]),
+    ).toEqual(m2Components.map((name) => [name, 'built']));
+    expect(componentInventory.every(({ states }) => states.length > 1)).toBe(true);
   });
 });

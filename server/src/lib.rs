@@ -48,6 +48,44 @@ pub fn app(state: AppState) -> Router {
         .route("/ready", get(ready))
         .route("/api/v1/me", get(workspace::me))
         .route(
+            "/api/v1/staff/organization",
+            get(workspace::get_organization)
+                .patch(workspace::update_settings)
+                .delete(workspace::request_deletion),
+        )
+        .route(
+            "/api/v1/staff/organization/deletion/cancel",
+            post(workspace::cancel_deletion),
+        )
+        .route(
+            "/api/v1/staff/organization/export",
+            get(workspace::export_organization),
+        )
+        .route(
+            "/api/v1/staff/workspaces",
+            post(workspace::create_additional_workspace),
+        )
+        .route(
+            "/api/v1/staff/workspaces/{id}",
+            get(workspace::get_workspace_by_id),
+        )
+        .route(
+            "/api/v1/staff/workspaces/{id}/actions",
+            post(workspace::create_action_in_workspace),
+        )
+        .route(
+            "/api/v1/staff/members/invitations",
+            post(workspace::create_invitation),
+        )
+        .route(
+            "/api/v1/staff/members/invitations/accept",
+            post(workspace::accept_invitation),
+        )
+        .route(
+            "/api/v1/billing/entitlement",
+            get(workspace::billing_status),
+        )
+        .route(
             "/api/v1/staff/workspace",
             get(workspace::get_workspace).post(workspace::create_workspace),
         )
@@ -220,8 +258,18 @@ async fn security_and_rate_limit(
         .is_some_and(|value| value.starts_with("text/html"));
     let known_html_route = matches!(
         path.as_str(),
-        "/" | "/demo" | "/client" | "/workspace" | "/auth/callback" | "/privacy" | "/terms"
-    );
+        "/" | "/demo"
+            | "/client"
+            | "/workspace"
+            | "/auth/callback"
+            | "/onboarding"
+            | "/app"
+            | "/app/settings"
+            | "/app/billing"
+            | "/privacy"
+            | "/terms"
+    ) || (path.starts_with("/app/workspaces/")
+        && path.ends_with("/actions/new"));
     if response.status().is_success() && is_html && !known_html_route {
         *response.status_mut() = StatusCode::NOT_FOUND;
     }
@@ -325,6 +373,14 @@ fn rate_policy(method: &str, path: &str) -> (&'static str, usize, Duration) {
         ("demo-session", 3, Duration::from_secs(60))
     } else if method == "POST" && path == "/api/v1/client-links/exchange" {
         ("link-exchange", 10, Duration::from_secs(60))
+    } else if path.starts_with("/api/v1/billing/") {
+        ("billing", 5, Duration::from_secs(3_600))
+    } else if path.ends_with("/export") || path.contains("/deletion") {
+        ("owner-sensitive", 3, Duration::from_secs(3_600))
+    } else if path.contains("/members/invitations") {
+        ("staff-invite", 10, Duration::from_secs(3_600))
+    } else if path.starts_with("/api/v1/staff/") && method != "GET" {
+        ("staff-write", 10, Duration::from_secs(2))
     } else if method == "POST" && path.ends_with("/submissions") {
         ("client-submit", 5, Duration::from_secs(60))
     } else if method != "GET" {

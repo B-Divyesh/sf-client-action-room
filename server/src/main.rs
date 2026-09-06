@@ -27,7 +27,11 @@ async fn main() {
             interval.tick().await;
             match purge_state.purge_expired().await {
                 Ok(count) if count > 0 => {
-                    info!(expired_demo_sessions = count, "expired demos purged")
+                    if let Err(error) = purge_state.persist_snapshot().await {
+                        error!(%error, "purged records could not be snapshotted")
+                    } else {
+                        info!(expired_records = count, "expired records purged")
+                    }
                 }
                 Ok(_) => {}
                 Err(error) => error!(%error, "expired demo purge failed"),

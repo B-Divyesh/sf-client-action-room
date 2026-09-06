@@ -25,6 +25,7 @@ uuid = { version = "1", features = ["v7", "serde"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
+rsa = { version = "0.9", features = ["pem"] }
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"
 

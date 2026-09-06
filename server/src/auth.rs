@@ -28,7 +28,7 @@ pub struct AuthService {
 #[derive(Clone)]
 struct KeyCache {
     issuer: String,
-    keys: HashMap<String, (String, String)>,
+    keys: HashMap<String, DecodingKey>,
     fetched_at: Instant,
 }
 
@@ -80,7 +80,10 @@ impl AuthService {
             tenant_id,
             client_id,
             discovery_url,
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .expect("identity HTTP client must build"),
             cache: Arc::new(RwLock::new(None)),
             accept_test_tokens: env::var("AUTH_TEST_MODE").as_deref() == Ok("1"),
         }
@@ -90,6 +93,10 @@ impl AuthService {
         let mut service = Self::from_env();
         service.accept_test_tokens = true;
         service
+    }
+
+    pub async fn warm(&self) -> Result<(), ApiError> {
+        self.keys(false).await.map(|_| ())
     }
 
     pub async fn verify(&self, headers: &HeaderMap) -> Result<StaffClaims, ApiError> {
@@ -118,14 +125,16 @@ impl AuthService {
             return Err(invalid_token());
         }
         let kid = header.kid.ok_or_else(invalid_token)?;
-        let cache = self.keys().await?;
-        let (n, e) = cache.keys.get(&kid).ok_or_else(invalid_token)?;
-        let key = DecodingKey::from_rsa_components(n, e).map_err(|_| invalid_token())?;
+        let mut cache = self.keys(false).await?;
+        if !cache.keys.contains_key(&kid) {
+            cache = self.keys(true).await?;
+        }
+        let key = cache.keys.get(&kid).ok_or_else(invalid_token)?;
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_audience(&[self.client_id.as_str()]);
         validation.set_issuer(&[cache.issuer.as_str()]);
         validation.validate_nbf = true;
-        let claims = decode::<StaffClaims>(token, &key, &validation)
+        let claims = decode::<StaffClaims>(token, key, &validation)
             .map_err(|_| invalid_token())?
             .claims;
         if claims.tid != self.tenant_id || claims.oid.is_empty() {
@@ -134,10 +143,12 @@ impl AuthService {
         Ok(claims)
     }
 
-    async fn keys(&self) -> Result<KeyCache, ApiError> {
-        if let Some(cache) = self.cache.read().expect("auth cache poisoned").clone() {
-            if cache.fetched_at.elapsed() < Duration::from_secs(3_600) {
-                return Ok(cache);
+    async fn keys(&self, force_refresh: bool) -> Result<KeyCache, ApiError> {
+        if !force_refresh {
+            if let Some(cache) = self.cache.read().expect("auth cache poisoned").clone() {
+                if cache.fetched_at.elapsed() < Duration::from_secs(3_600) {
+                    return Ok(cache);
+                }
             }
         }
         let discovery: Discovery = self
@@ -166,7 +177,11 @@ impl AuthService {
             .keys
             .into_iter()
             .filter(|key| key.kty == "RSA")
-            .map(|key| (key.kid, (key.n, key.e)))
+            .filter_map(|key| {
+                DecodingKey::from_rsa_components(&key.n, &key.e)
+                    .ok()
+                    .map(|decoding| (key.kid, decoding))
+            })
             .collect();
         let cache = KeyCache {
             issuer: discovery.issuer,
@@ -191,4 +206,141 @@ fn auth_unavailable() -> ApiError {
         "identity_unavailable",
         "Sign-in verification is unavailable. Try again in a moment.",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use rsa::{
+        pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding},
+        rand_core::OsRng,
+        RsaPrivateKey, RsaPublicKey,
+    };
+    use serde::Serialize;
+    use std::sync::OnceLock;
+
+    const ISSUER: &str = "https://issuer.example.test/tenant/v2.0";
+
+    fn fixture_keys() -> &'static (Vec<u8>, Vec<u8>) {
+        static KEYS: OnceLock<(Vec<u8>, Vec<u8>)> = OnceLock::new();
+        KEYS.get_or_init(|| {
+            let private = RsaPrivateKey::new(&mut OsRng, 2_048).unwrap();
+            let public = RsaPublicKey::from(&private);
+            (
+                private
+                    .to_pkcs8_pem(LineEnding::LF)
+                    .unwrap()
+                    .as_bytes()
+                    .to_vec(),
+                public
+                    .to_public_key_pem(LineEnding::LF)
+                    .unwrap()
+                    .as_bytes()
+                    .to_vec(),
+            )
+        })
+    }
+
+    #[derive(Serialize)]
+    struct FixtureClaims<'a> {
+        oid: &'a str,
+        tid: &'a str,
+        name: &'a str,
+        email: &'a str,
+        aud: &'a str,
+        iss: &'a str,
+        exp: usize,
+        nbf: usize,
+    }
+
+    fn fixture_service(kids: &[&str]) -> AuthService {
+        let keys = kids
+            .iter()
+            .map(|kid| {
+                (
+                    (*kid).to_owned(),
+                    DecodingKey::from_rsa_pem(&fixture_keys().1).unwrap(),
+                )
+            })
+            .collect();
+        AuthService {
+            tenant_id: DEFAULT_TENANT.into(),
+            client_id: DEFAULT_CLIENT.into(),
+            discovery_url: "http://127.0.0.1:1/unavailable".into(),
+            client: reqwest::Client::new(),
+            cache: Arc::new(RwLock::new(Some(KeyCache {
+                issuer: ISSUER.into(),
+                keys,
+                fetched_at: Instant::now(),
+            }))),
+            accept_test_tokens: false,
+        }
+    }
+
+    fn token(kid: &str, overrides: impl FnOnce(&mut FixtureClaims<'_>)) -> String {
+        let now = chrono::Utc::now().timestamp() as usize;
+        let mut claims = FixtureClaims {
+            oid: "staff-oid",
+            tid: DEFAULT_TENANT,
+            name: "Morgan Owner",
+            email: "morgan@example.test",
+            aud: DEFAULT_CLIENT,
+            iss: ISSUER,
+            exp: now + 300,
+            nbf: now.saturating_sub(10),
+        };
+        overrides(&mut claims);
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(kid.into());
+        encode(
+            &header,
+            &claims,
+            &EncodingKey::from_rsa_pem(&fixture_keys().0).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn bearer(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn validates_signature_audience_tenant_issuer_and_time() {
+        let service = fixture_service(&["current"]);
+        let valid = token("current", |_| {});
+        assert_eq!(
+            service.verify(&bearer(&valid)).await.unwrap().oid,
+            "staff-oid"
+        );
+
+        let wrong_audience = token("current", |claims| claims.aud = "another-client");
+        assert!(service.verify(&bearer(&wrong_audience)).await.is_err());
+        let wrong_tenant = token("current", |claims| claims.tid = "another-tenant");
+        assert!(service.verify(&bearer(&wrong_tenant)).await.is_err());
+        let wrong_issuer = token("current", |claims| {
+            claims.iss = "https://wrong.example.test"
+        });
+        assert!(service.verify(&bearer(&wrong_issuer)).await.is_err());
+        let expired = token("current", |claims| claims.exp = 1);
+        assert!(service.verify(&bearer(&expired)).await.is_err());
+        let future = token("current", |claims| {
+            claims.nbf = (chrono::Utc::now().timestamp() + 300) as usize
+        });
+        assert!(service.verify(&bearer(&future)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn selects_a_rotated_key_by_kid_and_rejects_unknown_keys() {
+        let service = fixture_service(&["old", "new"]);
+        let rotated = token("new", |_| {});
+        assert!(service.verify(&bearer(&rotated)).await.is_ok());
+        let unknown = token("unknown", |_| {});
+        assert!(service.verify(&bearer(&unknown)).await.is_err());
+    }
 }

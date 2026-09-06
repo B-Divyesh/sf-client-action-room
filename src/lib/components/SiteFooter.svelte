@@ -14,6 +14,6 @@
       <a href="/terms" onclick={(event) => follow(event, '/terms')}>Terms</a>
       <a href="https://sociobot.in">Built by Param Factory <span class="visually-hidden">(external site)</span></a>
     </nav>
-    <p class="build">M1 · municipal archive artwork by Param Factory</p>
+    <p class="build">M2 · municipal archive artwork by Param Factory</p>
   </div>
 </footer>

@@ -1,7 +1,7 @@
 # Client Action Room visual thesis
 
 - Direction: **municipal archive window**
-- Status: **implemented and retained through repair 1**
+- Status: **implemented through M2; the M1 visual system is retained for account and owner-control screens**
 - Last updated: 2026-08-28
 
 ## Thesis
@@ -19,7 +19,7 @@ The visual system must be recognizable in a thumbnail: an off-centre bronze mull
 
 ## Product and stack fit
 
-Svelte 5 + Vite is the web choice because the product has a reactive deadline queue, multi-state forms, link exchange, and optimistic staff edits, without needing React’s ecosystem weight. Rust/axum + PostgreSQL owns tenant boundaries, expiring grants, idempotent submissions, file scanning, audit records, reminders, and billing. The design stays mostly CSS and semantic HTML; no runtime illustration or animation library is allowed without a measured need.
+Svelte 5 + Vite is the web choice because the product has a reactive deadline queue, multi-state forms, link exchange, and optimistic staff edits, without needing React’s ecosystem weight. Rust/axum + durable SQLite owns tenant boundaries, expiring grants, idempotent submissions, file scanning, audit records, reminders, and entitlements. The design stays mostly CSS and semantic HTML; no runtime illustration or animation library is allowed without a measured need.
 
 The public route targets 150 KB initial JavaScript gzip. The signed-in app targets 200 KB. The visual signature comes from composition, rules, type, and one optimized original illustration—not a heavy component kit.
 
@@ -251,3 +251,7 @@ Before each milestone handoff:
 4. Measure compressed JS/CSS/fonts/images and Lighthouse budgets.
 5. Update the provenance register for every new image, icon, and font.
 6. Extract and audit public copy; each factual claim must map to `.factory/claims.json` and one tagged sandbox test.
+
+## M2 extension
+
+M2 keeps the same municipal archive window. Private routes use one-column ledger sheets for firm settings, staff roles, export, deletion recovery, and billing status. These surfaces add no new colors, typefaces, illustration, or motion. Destructive controls use the existing exception red; subscription status remains written text rather than color alone. At 390 px, the staff navigation wraps, setting fields fill the reading column, and action controls remain at least 44 px high.

@@ -48,16 +48,38 @@
   let composerError = '';
   let theme: 'light' | 'dark' = 'light';
   let staffAccount: AccountInfo | null = null;
-  let staffProfile: { id: string; name: string; email: string; has_workspace: boolean } | null = null;
+  type OrganizationOverview = {
+    id: string;
+    name: string;
+    time_zone: string;
+    region: string;
+    retention_days: number;
+    deletion_due_at: string | null;
+    role: string;
+    workspaces: Array<{ id: string; client_label: string; client_actor: string; open_actions: number }>;
+    members: Array<{ oid: string; display_name: string; role: string }>;
+    subscription: { tier: string; status: string; period_end: string | null; verified_at: string } | null;
+    recurring_billing_available: boolean;
+  };
+  let staffProfile: { id: string; name: string; email: string; has_workspace: boolean; organization_id: string | null; role: string | null } | null = null;
+  let organization: OrganizationOverview | null = null;
   let staffAccessToken = '';
   let firmName = '';
   let workspaceName = '';
   let clientName = '';
   let onboardingError = '';
+  let settingsName = '';
+  let settingsTimeZone = 'America/New_York';
+  let settingsRetention = 90;
+  let deletionConfirmation = '';
+  let inviteRole = 'member';
+  let invitationPath = '';
+  let billingStatus: { available: boolean; reason: string; subscription: OrganizationOverview['subscription']; export_available: boolean } | null = null;
 
   $: meta = routeMeta[route];
-  $: canonical = `${canonicalOrigin}${meta.canonicalPath}`;
+  $: canonical = `${canonicalOrigin}${route === 'new-action' ? pathname : meta.canonicalPath}`;
   $: sortedActions = demo ? orderedByDeadline(demo.actions) : [];
+  $: activeWorkspaceId = route === 'new-action' ? pathname.split('/')[3] ?? '' : organization?.workspaces[0]?.id ?? '';
 
   onMount(() => {
     theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
@@ -86,7 +108,7 @@
     requestId = '';
     if (route === 'demo') await loadDemo(new URLSearchParams(search).get('reset') === '1');
     if (route === 'client') await loadClient();
-    if (route === 'workspace' || route === 'auth-callback') await loadWorkspace();
+    if (['workspace', 'auth-callback', 'onboarding', 'app', 'new-action', 'settings', 'billing'].includes(route)) await loadWorkspace();
     await tick();
     document.querySelector<HTMLElement>('main h1')?.focus({ preventScroll: true });
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -156,21 +178,49 @@
 
   async function loadWorkspace() {
     loading = true;
+    demo = null;
     try {
       const { finishStaffSignIn, staffToken } = await import('./lib/auth');
       staffAccount = await finishStaffSignIn();
       if (route === 'auth-callback') {
-        navigate('/workspace');
+        navigate('/app');
         return;
       }
       if (staffAccount) {
         const token = await staffToken(staffAccount);
         staffAccessToken = token;
-        staffProfile = await api<{ id: string; name: string; email: string; has_workspace: boolean }>('/api/v1/me', {
+        staffProfile = await api<{ id: string; name: string; email: string; has_workspace: boolean; organization_id: string | null; role: string | null }>('/api/v1/me', {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (staffProfile.has_workspace) {
-          demo = await api<DemoQueue>('/api/v1/staff/workspace', {
+        const inviteToken = route === 'settings' ? new URLSearchParams(window.location.hash.slice(1)).get('invite') : null;
+        if (inviteToken && !staffProfile.organization_id) {
+          organization = await api<OrganizationOverview>('/api/v1/staff/members/invitations/accept', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ token: inviteToken }),
+          });
+          window.history.replaceState({}, '', '/app/settings');
+          staffProfile = { ...staffProfile, organization_id: organization.id, role: organization.role, has_workspace: organization.workspaces.length > 0 };
+          notice = 'Staff invitation accepted.';
+        }
+        if (staffProfile.organization_id) {
+          organization = await api<OrganizationOverview>('/api/v1/staff/organization', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          settingsName = organization.name;
+          settingsTimeZone = organization.time_zone;
+          settingsRetention = organization.retention_days;
+        }
+        if (route === 'billing' && staffProfile.organization_id) {
+          billingStatus = await api('/api/v1/billing/entitlement', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        }
+        if (staffProfile.has_workspace && route !== 'settings' && route !== 'billing') {
+          const queuePath = route === 'new-action'
+            ? `/api/v1/staff/workspaces/${encodeURIComponent(activeWorkspaceId)}`
+            : '/api/v1/staff/workspace';
+          demo = await api<DemoQueue>(queuePath, {
             headers: { Authorization: `Bearer ${token}` },
           });
         } else {
@@ -200,12 +250,93 @@
         }),
       });
       if (staffProfile) staffProfile = { ...staffProfile, has_workspace: true };
+      organization = await api<OrganizationOverview>('/api/v1/staff/organization', {
+        headers: { Authorization: `Bearer ${staffAccessToken}` },
+      });
       notice = 'Your firm workspace is ready. Create the first approval.';
+      if (route === 'onboarding') navigate('/app');
     } catch (caught) {
       onboardingError = caught instanceof Error ? caught.message : 'We could not create the workspace. Try again.';
     } finally {
       busy = false;
     }
+  }
+
+  async function saveSettings(event: SubmitEvent) {
+    event.preventDefault();
+    busy = true;
+    error = '';
+    try {
+      organization = await api<OrganizationOverview>('/api/v1/staff/organization', {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${staffAccessToken}` },
+        body: JSON.stringify({ name: settingsName, time_zone: settingsTimeZone, retention_days: settingsRetention }),
+      });
+      notice = 'Firm settings saved.';
+    } catch (caught) { showError(caught); }
+    finally { busy = false; }
+  }
+
+  async function downloadExport() {
+    busy = true;
+    error = '';
+    try {
+      const response = await fetch('/api/v1/staff/organization/export', {
+        credentials: 'same-origin',
+        headers: { Authorization: `Bearer ${staffAccessToken}` },
+      });
+      if (!response.ok) throw new Error('export failed');
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'client-action-room-export.json';
+      link.click();
+      URL.revokeObjectURL(url);
+      notice = 'Your firm export downloaded.';
+    } catch { error = 'We could not prepare the export. Try again.'; }
+    finally { busy = false; }
+  }
+
+  async function scheduleDeletion(event: SubmitEvent) {
+    event.preventDefault();
+    busy = true;
+    try {
+      const result = await api<{ deletion_due_at: string }>('/api/v1/staff/organization', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${staffAccessToken}` },
+        body: JSON.stringify({ confirmation: deletionConfirmation }),
+      });
+      if (organization) organization = { ...organization, deletion_due_at: result.deletion_due_at };
+      notice = 'Firm deletion is scheduled. You can cancel it before the date shown.';
+    } catch (caught) { showError(caught); }
+    finally { busy = false; }
+  }
+
+  async function cancelDeletion() {
+    busy = true;
+    try {
+      await api('/api/v1/staff/organization/deletion/cancel', {
+        method: 'POST', headers: { Authorization: `Bearer ${staffAccessToken}` },
+      });
+      if (organization) organization = { ...organization, deletion_due_at: null };
+      deletionConfirmation = '';
+      notice = 'Firm deletion cancelled.';
+    } catch (caught) { showError(caught); }
+    finally { busy = false; }
+  }
+
+  async function createInvitation() {
+    busy = true;
+    try {
+      const result = await api<{ path: string }>('/api/v1/staff/members/invitations', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${staffAccessToken}` },
+        body: JSON.stringify({ role: inviteRole }),
+      });
+      invitationPath = new URL(result.path, window.location.origin).toString();
+      notice = 'Staff invitation link ready.';
+    } catch (caught) { showError(caught); }
+    finally { busy = false; }
   }
 
   async function leaveWorkspace() {
@@ -222,10 +353,10 @@
       const root = route === 'demo' ? '/api/v1/demo' : '/api/v1/staff';
       publishedLink = await api<{ path: string; expires_at: string }>(
         `${root}/actions/${encodeURIComponent(action.id)}/publish`,
-        { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID(), ...(route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {}) } },
+        { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID(), ...(route !== 'demo' ? { Authorization: `Bearer ${staffAccessToken}` } : {}) } },
       );
       demo = await api<DemoQueue>(route === 'demo' ? '/api/v1/demo/queue' : '/api/v1/staff/workspace', {
-        headers: route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
+        headers: route !== 'demo' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
       });
       notice = 'The client link is ready. It can open only this action.';
     } catch (caught) {
@@ -259,9 +390,14 @@
     }
     busy = true;
     try {
-      await api<DemoAction>(route === 'demo' ? '/api/v1/demo/actions' : '/api/v1/staff/actions', {
+      const actionPath = route === 'demo'
+        ? '/api/v1/demo/actions'
+        : route === 'new-action'
+          ? `/api/v1/staff/workspaces/${encodeURIComponent(activeWorkspaceId)}/actions`
+          : '/api/v1/staff/actions';
+      await api<DemoAction>(actionPath, {
         method: 'POST',
-        headers: { 'Idempotency-Key': crypto.randomUUID(), ...(route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {}) },
+        headers: { 'Idempotency-Key': crypto.randomUUID(), ...(route !== 'demo' ? { Authorization: `Bearer ${staffAccessToken}` } : {}) },
         body: JSON.stringify({
           title: newTitle,
           instructions: newInstructions,
@@ -269,12 +405,13 @@
         }),
       });
       demo = await api<DemoQueue>(route === 'demo' ? '/api/v1/demo/queue' : '/api/v1/staff/workspace', {
-        headers: route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
+        headers: route !== 'demo' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
       });
       newTitle = '';
       newInstructions = '';
       newDeadline = '';
       notice = 'The new approval is in the deadline list.';
+      if (route === 'new-action') navigate('/app');
     } catch (caught) {
       composerError = caught instanceof Error ? caught.message : 'We could not create the approval. Try again.';
     } finally {
@@ -390,10 +527,10 @@
       const root = route === 'demo' ? '/api/v1/demo' : '/api/v1/staff';
       const result = await api<{ scheduled_for: string }>(`${root}/actions/${encodeURIComponent(action.id)}/reminder`, {
         method: 'POST',
-        headers: route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
+        headers: route !== 'demo' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
       });
       demo = await api<DemoQueue>(route === 'demo' ? '/api/v1/demo/queue' : '/api/v1/staff/workspace', {
-        headers: route === 'workspace' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
+        headers: route !== 'demo' ? { Authorization: `Bearer ${staffAccessToken}` } : {},
       });
       notice = `Reminder scheduled for ${formatDate(result.scheduled_for)}.`;
     } catch (caught) { showError(caught); }
@@ -456,7 +593,7 @@
 {#if route === 'demo' || (route === 'client' && client?.namespace === 'demo')}
   <DemoBanner busy={busy} onReset={() => navigate('/demo?reset=1')} onStart={startForReal} />
 {/if}
-<ArchiveHeader route={route} {navigate} {theme} {toggleTheme} />
+<ArchiveHeader route={route} {navigate} {theme} {toggleTheme} signedIn={Boolean(staffAccount)} signOut={leaveWorkspace} />
 
 {#if route === 'home'}
   <main id="main" class="landing" tabindex="-1">
@@ -515,13 +652,140 @@
         <a class="text-link" href="/privacy" onclick={(event) => { event.preventDefault(); navigate('/privacy'); }}>Read the privacy details</a>
       </div>
     </section>
+
+    <section class="pricing" aria-labelledby="pricing-title">
+      <div class="section-heading"><p class="eyebrow">Pricing</p><h2 id="pricing-title">Planned recurring plans</h2></div>
+      <div class="pricing-list">
+        <p><strong>Starter · $49/month</strong><span>Five client workspaces and three staff seats.</span></p>
+        <p><strong>Studio · $99/month</strong><span>Twenty client workspaces and ten staff seats.</span></p>
+      </div>
+      <p>Checkout is not available until Sociobot registers these recurring offers.</p>
+      <a class="text-link" href="/app/billing" onclick={(event) => { event.preventDefault(); navigate('/app/billing'); }}>Check plan status</a>
+    </section>
   </main>
 
-{:else if route === 'demo' || (route === 'workspace' && staffProfile)}
+{:else if route === 'onboarding' && staffProfile}
+  <main id="main" class="prose-page" tabindex="-1">
+    <p class="eyebrow">Firm setup</p>
+    <h1 tabindex="-1">Set up your firm</h1>
+    {#if staffProfile.has_workspace}
+      <p class="lede">Your firm is ready. Open the queue to create or share an approval.</p>
+      <a class="button primary" href="/app" onclick={(event) => { event.preventDefault(); navigate('/app'); }}>Open action queue</a>
+    {:else}
+      <form class="onboarding-form" onsubmit={createWorkspace} novalidate>
+        <h2>Name your first client workspace</h2>
+        <p>This starts empty. Sample data never moves into your firm account.</p>
+        {#if onboardingError}<p class="error-summary" role="alert">{onboardingError}</p>{/if}
+        <label for="firm-name">Firm name</label>
+        <input id="firm-name" maxlength="80" bind:value={firmName} required />
+        <label for="workspace-name">Client workspace name</label>
+        <input id="workspace-name" maxlength="80" bind:value={workspaceName} required />
+        <label for="client-name">Client name</label>
+        <input id="client-name" maxlength="80" bind:value={clientName} required />
+        <button class="button primary" type="submit" disabled={busy}>{busy ? 'Creating workspace…' : 'Create firm workspace'}</button>
+      </form>
+    {/if}
+  </main>
+
+{:else if route === 'new-action' && staffProfile}
+  <main id="main" class="prose-page" tabindex="-1">
+    <p class="eyebrow">Approval request</p>
+    <h1 tabindex="-1">Create a client action</h1>
+    <p class="lede">Name one approval, explain what to review, and set its deadline.</p>
+    {#if error}<p class="inline-notice danger" role="alert">{error}</p>{/if}
+    {#if demo}<form class="onboarding-form" onsubmit={createApproval} novalidate>
+      {#if composerError}<p class="error-summary" role="alert">{composerError}</p>{/if}
+      <label for="new-action-title">Approval name</label>
+      <input id="new-action-title" maxlength="120" bind:value={newTitle} required />
+      <label for="new-action-instructions">What should the client review?</label>
+      <textarea id="new-action-instructions" rows="4" maxlength="2000" bind:value={newInstructions} required></textarea>
+      <label for="new-action-deadline">Deadline</label>
+      <input id="new-action-deadline" type="datetime-local" bind:value={newDeadline} required />
+      <div class="button-row"><button class="button primary" type="submit" disabled={busy}>{busy ? 'Creating approval…' : 'Create approval'}</button><a class="button secondary" href="/app" onclick={(event) => { event.preventDefault(); navigate('/app'); }}>Cancel</a></div>
+    </form>{:else if !loading}<a class="button secondary" href="/app" onclick={(event) => { event.preventDefault(); navigate('/app'); }}>Return to the action queue</a>{/if}
+  </main>
+
+{:else if route === 'settings' && staffProfile}
+  <main id="main" class="prose-page" tabindex="-1">
+    <p class="eyebrow">Firm controls</p>
+    <h1 tabindex="-1">Manage firm settings</h1>
+    {#if notice}<p class="inline-notice success" role="status">{notice}</p>{/if}
+    {#if error}<p class="inline-notice danger" role="alert">{error}</p>{/if}
+    {#if organization}
+      <form class="settings-panel" onsubmit={saveSettings} novalidate>
+        <h2>Firm record</h2>
+        <label for="settings-name">Firm name</label>
+        <input id="settings-name" maxlength="80" bind:value={settingsName} required disabled={organization.role === 'member'} />
+        <label for="settings-zone">Time zone</label>
+        <select id="settings-zone" bind:value={settingsTimeZone} disabled={organization.role === 'member'}>
+          <option value="America/New_York">America/New_York</option>
+          <option value="America/Chicago">America/Chicago</option>
+          <option value="America/Los_Angeles">America/Los_Angeles</option>
+          <option value="Europe/London">Europe/London</option>
+          <option value="Asia/Kolkata">Asia/Kolkata</option>
+          <option value="Etc/UTC">UTC</option>
+        </select>
+        <label for="settings-retention">Record retention</label>
+        <select id="settings-retention" bind:value={settingsRetention} disabled={organization.role === 'member'}>
+          <option value={30}>30 days after completion</option>
+          <option value={90}>90 days after completion</option>
+          <option value={365}>365 days after completion</option>
+          <option value={0}>Until firm deletion</option>
+        </select>
+        <p class="field-note">Region moves are not available here. Export your records before requesting a move.</p>
+        {#if organization.role !== 'member'}<button class="button primary" type="submit" disabled={busy}>Save firm settings</button>{:else}<p class="field-note">Ask a firm owner or admin to change these settings.</p>{/if}
+      </form>
+      <section class="settings-panel" aria-labelledby="people-title">
+        <h2 id="people-title">People</h2>
+        <ul class="member-list">{#each organization.members as member}<li><span>{member.display_name || 'Staff member'}</span><strong>{member.role}</strong></li>{/each}</ul>
+        {#if organization.role !== 'member'}
+          <label for="invite-role">New member role</label>
+          <select id="invite-role" bind:value={inviteRole}><option value="member">Member</option><option value="admin">Admin</option></select>
+          <button class="button secondary" type="button" disabled={busy} onclick={createInvitation}>Create staff invitation</button>
+          {#if invitationPath}<p class="share-result"><strong>Invitation link</strong><code>{invitationPath}</code></p>{/if}
+          <p class="field-note">Additional seats require an active recurring plan.</p>
+        {:else}<p class="field-note">Ask a firm owner or admin to invite staff.</p>{/if}
+      </section>
+      <section class="settings-panel" aria-labelledby="data-title">
+        <h2 id="data-title">Export and deletion</h2>
+        {#if organization.role === 'owner'}
+          <p>Download your firm record as JSON.</p>
+          <button class="button secondary" type="button" disabled={busy} onclick={downloadExport}>Download firm export</button>
+        {#if organization.deletion_due_at}
+          <p class="inline-notice danger">Deletion is scheduled for <time datetime={organization.deletion_due_at}>{formatDate(organization.deletion_due_at)}</time>.</p>
+          <button class="button secondary" type="button" disabled={busy} onclick={cancelDeletion}>Cancel firm deletion</button>
+        {:else}
+          <form class="danger-zone" onsubmit={scheduleDeletion} novalidate>
+            <label for="deletion-confirmation">Type “{organization.name}” to schedule deletion</label>
+            <input id="deletion-confirmation" bind:value={deletionConfirmation} required />
+            <button class="button danger" type="submit" disabled={busy}>Schedule firm deletion</button>
+            <p class="field-note">Deletion waits seven days. You can cancel during that time.</p>
+          </form>
+        {/if}
+        {:else}<p>Only the firm owner can export or schedule deletion.</p>{/if}
+      </section>
+    {:else if !loading}
+      <p>Create your firm before changing settings.</p>
+      <a class="button primary" href="/onboarding" onclick={(event) => { event.preventDefault(); navigate('/onboarding'); }}>Set up your firm</a>
+    {/if}
+  </main>
+
+{:else if route === 'billing' && staffProfile}
+  <main id="main" class="prose-page" tabindex="-1">
+    <p class="eyebrow">Recurring plan</p>
+    <h1 tabindex="-1">Manage your plan</h1>
+    {#if billingStatus?.subscription}
+      <section class="settings-panel"><h2>Current subscription</h2><p><strong>{billingStatus.subscription.tier}</strong> · {billingStatus.subscription.status}</p>{#if billingStatus.subscription.period_end}<p>Current paid period ends <time datetime={billingStatus.subscription.period_end}>{formatDate(billingStatus.subscription.period_end)}</time>.</p>{/if}<p>Firm export stays available when the paid period ends.</p></section>
+    {:else}
+      <section class="settings-panel"><h2>Checkout is not available yet</h2><p>The recurring Sociobot offers still need factory registration. No payment details are collected here.</p><p>Your existing approval workspace and export remain available.</p></section>
+    {/if}
+  </main>
+
+{:else if route === 'demo' || ((route === 'workspace' || route === 'app') && staffProfile)}
   <main id="main" class="app-page" tabindex="-1">
     <section class="page-intro">
       <p class="eyebrow">{demo?.firm ?? 'Firm workspace'} · {route === 'demo' ? 'sample workspace' : 'firm workspace'}</p>
-      <h1 tabindex="-1">{route === 'demo' ? 'Your sample client action room' : 'Your firm action room'}</h1>
+      <h1 tabindex="-1">{route === 'demo' ? 'Your sample client action room' : 'Client action queue'}</h1>
       <p>{route === 'demo' ? 'Open any scoped client action, complete it as Maya, then read the dated record.' : 'Create and issue client actions. Your workspace returns when you sign in again.'}</p>
     </section>
     {#if notice}<p class="inline-notice success" role="status">{notice}</p>{/if}
@@ -530,7 +794,7 @@
     {/if}
     {#if loading}
       <section class="skeleton" aria-busy="true" aria-label="Loading the sample room"><span></span><span></span><span></span></section>
-    {:else if route === 'workspace' && staffProfile && !demo}
+    {:else if route !== 'demo' && staffProfile && !demo}
       <form class="onboarding-form" onsubmit={createWorkspace} novalidate>
         <h2>Name your first client workspace</h2>
         <p>This starts empty. Sample data never moves into your firm account.</p>
@@ -598,6 +862,7 @@
               <button class="button secondary" type="submit" disabled={busy}>Create approval</button>
             </form>
           </details>
+          {#if route !== 'demo'}<a class="text-link" href={`/app/workspaces/${organization?.workspaces[0]?.id ?? 'new'}/actions/new`} onclick={(event) => { event.preventDefault(); navigate(`/app/workspaces/${organization?.workspaces[0]?.id ?? 'new'}/actions/new`); }}>Open the full action form</a>{/if}
           {#if route === 'demo'}<div class="expiry-example">
             <h3>Check an expired link</h3>
             <p>This fixture proves expired links reveal no request content.</p>
@@ -720,7 +985,7 @@
     {/if}
   </main>
 
-{:else if route === 'workspace' || route === 'auth-callback'}
+{:else if ['workspace', 'auth-callback', 'onboarding', 'app', 'new-action', 'settings', 'billing'].includes(route)}
   <main id="main" class="prose-page" tabindex="-1">
     <p class="eyebrow">Private staff area</p>
     <h1 tabindex="-1">Open your firm workspace</h1>
@@ -745,8 +1010,9 @@
     <section><h2>What the demo stores</h2><p>The server keeps sample actions, answers, files, and audit times for up to 24 hours.</p></section>
     <section><h2>What client links reveal</h2><p>A client link opens one action. The browser removes its secret from the address after exchange.</p></section>
     <section><h2>What the demo sends</h2><p>Demo traffic stays on this site. It does not send email, collect payment, or load advertising.</p></section>
-    <section><h2>What a firm workspace stores</h2><p>A firm workspace stores its names, approval requests, client answers, and audit times in the product database.</p></section>
-    <section><h2>Deletion and contact</h2><p>Resetting or leaving deletes the current sample room. For privacy questions, email <a href="mailto:privacy@sociobot.in">privacy@sociobot.in</a>.</p></section>
+    <section><h2>What a firm workspace stores</h2><p>A firm workspace stores its names, approval requests, client answers, membership roles, and audit times in this product’s SQLite database.</p></section>
+    <section><h2>Export and deletion</h2><p>Firm owners can download a JSON record, choose retention, and cancel a scheduled deletion during its seven-day recovery window.</p></section>
+    <section><h2>Contact</h2><p>Resetting or leaving deletes the current sample room. For privacy questions, email <a href="mailto:privacy@sociobot.in">privacy@sociobot.in</a>.</p></section>
   </main>
 
 {:else if route === 'terms'}

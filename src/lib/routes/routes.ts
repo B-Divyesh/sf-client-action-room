@@ -4,7 +4,20 @@ export interface RouteMeta {
   canonicalPath: string;
 }
 
-export type RouteName = 'home' | 'demo' | 'client' | 'workspace' | 'auth-callback' | 'privacy' | 'terms' | 'not-found';
+export type RouteName =
+  | 'home'
+  | 'demo'
+  | 'client'
+  | 'workspace'
+  | 'auth-callback'
+  | 'onboarding'
+  | 'app'
+  | 'new-action'
+  | 'settings'
+  | 'billing'
+  | 'privacy'
+  | 'terms'
+  | 'not-found';
 
 export const routeMeta: Record<RouteName, RouteMeta> = {
   home: {
@@ -32,6 +45,31 @@ export const routeMeta: Record<RouteName, RouteMeta> = {
     description: 'Finish signing in to Client Action Room.',
     canonicalPath: '/auth/callback',
   },
+  onboarding: {
+    title: 'Set up your firm — Client Action Room',
+    description: 'Name your firm and first client workspace.',
+    canonicalPath: '/onboarding',
+  },
+  app: {
+    title: 'Action queue — Client Action Room',
+    description: 'Create, share, and review client approval actions.',
+    canonicalPath: '/app',
+  },
+  'new-action': {
+    title: 'New action — Client Action Room',
+    description: 'Create one approval request and set its deadline.',
+    canonicalPath: '/app/workspaces/new/actions/new',
+  },
+  settings: {
+    title: 'Settings — Client Action Room',
+    description: 'Manage firm retention, staff access, export, and deletion.',
+    canonicalPath: '/app/settings',
+  },
+  billing: {
+    title: 'Plans — Client Action Room',
+    description: 'Read the current recurring checkout status for your firm.',
+    canonicalPath: '/app/billing',
+  },
   privacy: {
     title: 'Privacy — Client Action Room',
     description: 'Read how Client Action Room handles sample, client, and account data.',
@@ -56,6 +94,11 @@ export function resolveRoute(pathname: string, search = ''): RouteName {
   if (pathname === '/client') return 'client';
   if (pathname === '/workspace') return 'workspace';
   if (pathname === '/auth/callback') return 'auth-callback';
+  if (pathname === '/onboarding') return 'onboarding';
+  if (pathname === '/app') return 'app';
+  if (/^\/app\/workspaces\/[^/]+\/actions\/new$/.test(pathname)) return 'new-action';
+  if (pathname === '/app/settings') return 'settings';
+  if (pathname === '/app/billing') return 'billing';
   if (pathname === '/privacy') return 'privacy';
   if (pathname === '/terms') return 'terms';
   return 'not-found';

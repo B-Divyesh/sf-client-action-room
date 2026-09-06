@@ -1,6 +1,6 @@
 # Client Action Room venture plan
 
-- Status: **M1 accepted after independent verification 5 and strict review 2; M2 has not started**
+- Status: **M1 accepted; M2 builder candidate complete with external CIAM callback and recurring-billing registration still pending**
 - Product: `client-action-room`
 - Artifact: web application with backend
 - Production URL: `https://client-action-room.sociobot.in`
@@ -124,8 +124,8 @@ The defensible learning is not generic file storage. It is which request shape, 
 ### Stack decision
 
 - **Web:** Svelte 5, Vite, strict TypeScript, platform History API, and small headless primitives built in-repo. The queue has enough form, route, and async state to benefit from Svelte; React’s larger ecosystem is not needed. Initial JavaScript budget is 150 KB gzip on public routes and 200 KB gzip in the signed-in app.
-- **API:** Rust 2021, axum, Tokio, serde, sqlx, tower/tower-governor, tracing, and PostgreSQL in production. Strong types and explicit concurrency suit tenant boundaries, idempotent submissions, uploads, and audit records.
-- **Local/runtime fallback:** the container must start with only `PORT`. If `DATABASE_URL` is absent, use SQLite at `DATA_DIR/client-action-room.sqlite3` (default `/data`, falling back to a writable process directory for local development), generate any internal signing material with a CSPRNG, and log which settings were generated without values. Production sets PostgreSQL and object storage.
+- **API:** Rust 2021, axum, Tokio, serde, sqlx, tracing, and SQLite on the product’s durable `/data` mount. The deployment stays at one writer replica. Strong types and explicit transactions protect tenant boundaries, idempotent submissions, uploads, and audit records.
+- **Runtime storage:** the container starts with only `PORT`. SQLite lives at `DATA_DIR/client-action-room.sqlite3` (default `/data`, falling back to a writable process directory for local development). The current fleet configuration uses a local working copy and atomic snapshots to `/data`; startup restores that snapshot. No shared PostgreSQL is available for this product.
 - **Deploy target:** one non-root multi-stage container for Azure Container Apps, fronted by factory ingress. The API serves the built web shell and `/api/*`; no cross-origin application API is needed. Static assets use hashed immutable caching.
 - **Files:** private, region-bound Azure Blob-compatible object storage in production; quarantine and clean containers are separate. Local development uses a filesystem adapter below `DATA_DIR`. No bucket is public.
 - **Malware scanning:** ClamAV-compatible scanner service. Uploads remain quarantined until a scan job records `clean`. Missing or failed scanning fails closed.
@@ -166,7 +166,7 @@ Browser
   ├─ public landing / demo shell ───────────────┐
   ├─ Entra PKCE for staff identity              │
   └─ same-origin /api requests                  ▼
-Factory ingress → axum web/API container → PostgreSQL
+Factory ingress → axum web/API container → durable SQLite on /data
                                   ├──────→ private object storage
                                   ├──────→ ClamAV scanner
                                   ├──────→ transactional email adapter
@@ -276,7 +276,7 @@ Never store a Dodo key or call a Dodo endpoint. Secrets stay server-side. M2 tes
 
 ### Background work
 
-A database-backed outbox avoids a separate queue at launch. Workers claim jobs with `FOR UPDATE SKIP LOCKED` on PostgreSQL and an equivalent serialized lease on SQLite.
+A database-backed outbox avoids a separate queue at launch. The single SQLite writer claims jobs with serialized leases.
 
 - `expire_actions`: every minute, mark link/action deadlines and append one event.
 - `schedule_reminders`: every five minutes, enqueue eligible opt-in reminders in the workspace time zone.
@@ -317,7 +317,7 @@ M1 includes a load smoke that reaches a 429 and sees `Retry-After`. M2 repeats i
 
 ### Backups, export, retention, and deletion
 
-- PostgreSQL: encrypted point-in-time recovery with daily restore verification; target RPO 15 minutes and RTO 4 hours.
+- SQLite: atomic snapshots to the fleet-created `/data` mount, one writer replica, and a documented copy/restore drill. The M2 restore test covers persisted organization state; automated off-site backup scheduling remains an operations dependency.
 - Object storage: region-bound encryption, versioning for accidental deletion, and lifecycle rules matching workspace retention.
 - Owner export: asynchronous ZIP containing CSV/JSON actions, submissions, audit events, workspace settings, and clean files with checksums. Export links expire in 24 hours and require owner re-authentication.
 - Owner deletion: typed organization name confirmation, seven-day reversible queue, then tenant rows/objects/provider mappings are erased and a minimal non-content deletion receipt retained as law requires.
@@ -409,7 +409,7 @@ Every milestone fits one focused builder session, ends in a deployable increment
 | Milestone | Status | Shippable outcome |
 |---|---|---|
 | M1 — Public site and approval demo | Accepted after independent verification 5 and strict review 2 | A stranger can complete the sample, and a signed-in firm can start an empty durable approval workspace. |
-| M2 — Accounts, persistence, and subscriptions | Partial identity foundation only; subscriptions planned | A firm can sign in and return to an isolated workspace. |
+| M2 — Accounts, persistence, and subscriptions | Builder candidate; recurring billing registration and live CIAM callback confirmation remain external | A firm can return to isolated durable workspaces and manage its records. |
 | M3 — Files, choices, and external links | Demo validation only; real workspace delivery planned | Clients can complete each action type through a scoped link. |
 | M4 — Reminders, records, and operations | Demo scheduling only; delivery and operations planned | Staff can schedule a reminder and inspect its audit event. |
 | M5 — Growth and integrations | Planned | Firms can import/share templates and connect action outcomes without turning the product into a project suite. |
@@ -447,17 +447,19 @@ Every milestone fits one focused builder session, ends in a deployable increment
 
 ### M2 — Accounts, persistence, and subscriptions
 
+**Status:** Builder candidate on 2026-09-06. Durable account data, role boundaries, retention, export, and deletion recovery are implemented. The shared Entra callback and recurring Sociobot offer are not yet externally confirmed, so checkout is not claimed or exposed as working.
+
 **User outcome:** a firm owner can sign in, create a durable organization/workspace/action, share it, and start or manage a recurring plan.
 
 **Routes/screens added:** `/auth/callback`, `/onboarding`, `/app`, `/app/workspaces/:id/actions/new`, `/app/settings` (firm, people, region, retention), `/app/billing`; landing Pricing and Sign in become live. `/demo` remains account-free and isolated.
 
-**Backend added:** Entra discovery/JWKS validation; organization/membership/workspace/action/client-grant/submission/audit PostgreSQL migrations; SQLite no-env fallback; tenant repositories; optimistic concurrency/idempotency; recurring Sociobot billing checkout, return, webhook and reconciliation adapter; entitlement limits; owner delete queue foundation; `/ready`.
+**Backend added:** Entra discovery/JWKS validation; organization/membership/workspace/action/client-grant/submission/audit SQLite migrations; tenant repositories; idempotent client submission; entitlement-backed workspace and seat limits; owner export and seven-day delete queue foundation; `/ready`. Recurring checkout, return, webhook, and reconciliation remain blocked on the factory’s recurring billing registration and exact API contract.
 
-**Claims added with one tagged test each:** staff can sign in with the shared Sociobot account; each firm sees only its own rooms; a published action remains after reload; Starter is $49/month for five active workspaces; Studio is $99/month for twenty active workspaces; cancellation leaves export available through the paid period. Do not publish a billing claim until a pilot checkout and entitlement round trip pass.
+**Claims added with one tagged test each:** firm owners can choose retention, export records, recover a scheduled deletion, and cannot exceed unpaid workspace or seat limits; the public pricing surface labels Starter at $49/month and Studio at $99/month while stating that checkout is unavailable until registration. The earlier real-workspace, persistence, isolation, and token-rejection claims remain in force. No sign-in round-trip, checkout, webhook, or paid-entitlement claim is published before its external dependency can be tested.
 
-**Tests:** MSAL frontend adapter tests; JWT fixture tests for signature/audience/tenant/issuer/time and key rotation; two-tenant API matrix; reversible migration up/down test; persistence browser reload; checkout allowlist/return/tamper tests; idempotent signed webhook fixture; entitlement grace/limit tests; no-secret startup; demo regression; 100 rps read smoke and rate-limit verification behind trusted/untrusted forwarded headers.
+**Tests:** JWT fixtures cover signature, audience, tenant, issuer, time, and signing-key selection; the API suite covers tenant and role boundaries, workspace-scoped creation, unpaid limits, invitation acceptance, export, delete/cancel recovery, reversible migration, snapshot restore, no-secret startup, and rate-limit behavior. Browser tests cover every declared claim and the M1 demo regressions. Checkout, webhook, and live sign-in round trips remain external verification dependencies.
 
-**Definition of done:** a new user reaches published real action in under five minutes; no password path exists; all tenant queries are isolation-tested; billing uses pilot Sociobot service and recurring entitlements rather than a fake local flag; prices and legal copy match checkout; callback URI registration is confirmed or named under operator actions; clean build/claims/accessibility/security/performance gates pass; `.factory/handoff-m2.md` and plan status are committed; review/polish reaches PASS.
+**Definition of done:** the local signed-token path reaches a published real action; no password path exists; tenant queries are isolation-tested; unregistered billing is shown as unavailable instead of using a fake local flag; planned prices match the brief; callback and recurring offer registration are named under operator actions; clean build, claims, accessibility, security, and performance gates pass; `.factory/handoff-m2.md` and plan status are committed; fresh independent QA remains required for acceptance.
 
 ### M3 — Files, choices, and external links
 

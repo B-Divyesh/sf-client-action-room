@@ -443,6 +443,18 @@ async fn reversible_migration_removes_demo_schema() {
     .await
     .unwrap();
     sqlx::raw_sql(include_str!(
+        "../migrations/202609060005_accounts_persistence.up.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/202609060005_accounts_persistence.down.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
         "../migrations/202609060004_demo_delivery_queue.down.sql"
     ))
     .execute(&pool)
@@ -471,6 +483,347 @@ async fn reversible_migration_removes_demo_schema() {
     .await
     .unwrap();
     assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn organization_membership_limits_export_and_delete_recovery_are_enforced() {
+    let state = state().await;
+    let router = app(state.clone());
+    let created = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/workspace",
+        "m2-owner",
+        Some(json!({
+            "firm_name": "Juniper Works",
+            "client_label": "Harbor launch",
+            "client_actor": "Sam Lee"
+        })),
+    )
+    .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let overview = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/organization",
+        "m2-owner",
+        None,
+    )
+    .await;
+    assert_eq!(overview.status(), StatusCode::OK);
+    let overview = json_body(overview).await;
+    let organization_id = overview["id"].as_str().unwrap().to_owned();
+    assert_eq!(overview["members"][0]["role"], "owner");
+    assert_eq!(overview["workspaces"].as_array().unwrap().len(), 1);
+
+    let unpaid_second = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/workspaces",
+        "m2-owner",
+        Some(json!({"client_label": "Second client", "client_actor": "Robin"})),
+    )
+    .await;
+    assert_eq!(unpaid_second.status(), StatusCode::PAYMENT_REQUIRED);
+
+    sqlx::query(
+        "INSERT INTO subscriptions
+         (organization_id, provider_reference, tier, status, period_end, verified_at, provider_event_id)
+         VALUES (?, 'fixture-subscription', 'starter', 'active', ?, ?, 'fixture-event')",
+    )
+    .bind(&organization_id)
+    .bind("2026-09-28T14:00:00+00:00")
+    .bind("2026-08-28T14:00:00+00:00")
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let paid_second = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/workspaces",
+        "m2-owner",
+        Some(json!({"client_label": "Second client", "client_actor": "Robin"})),
+    )
+    .await;
+    assert_eq!(paid_second.status(), StatusCode::CREATED);
+
+    let invitation = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/members/invitations",
+        "m2-owner",
+        Some(json!({"role": "member"})),
+    )
+    .await;
+    assert_eq!(invitation.status(), StatusCode::CREATED);
+    let invitation = json_body(invitation).await;
+    let token = invitation["path"]
+        .as_str()
+        .unwrap()
+        .split("invite=")
+        .nth(1)
+        .unwrap();
+    let accepted = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/members/invitations/accept",
+        "m2-member",
+        Some(json!({"token": token})),
+    )
+    .await;
+    assert_eq!(accepted.status(), StatusCode::OK);
+    assert_eq!(json_body(accepted).await["role"], "member");
+    let member_read = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/organization",
+        "m2-member",
+        None,
+    )
+    .await;
+    assert_eq!(member_read.status(), StatusCode::OK);
+    let first_workspace_id = overview["workspaces"][0]["id"].as_str().unwrap();
+    let scoped_action = send_auth(
+        router.clone(),
+        "POST",
+        &format!("/api/v1/staff/workspaces/{first_workspace_id}/actions"),
+        "m2-owner",
+        Some(json!({
+            "title": "Approve the launch note",
+            "instructions": "Read the final note and approve it.",
+            "due_at": "2026-08-30T14:00:00+00:00"
+        })),
+    )
+    .await;
+    assert_eq!(scoped_action.status(), StatusCode::CREATED);
+    let member_export = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/organization/export",
+        "m2-member",
+        None,
+    )
+    .await;
+    assert_eq!(member_export.status(), StatusCode::FORBIDDEN);
+    let reserved_invitation = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/members/invitations",
+        "m2-owner",
+        Some(json!({"role": "admin"})),
+    )
+    .await;
+    assert_eq!(reserved_invitation.status(), StatusCode::CREATED);
+    let over_seat_limit = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/members/invitations",
+        "m2-owner",
+        Some(json!({"role": "member"})),
+    )
+    .await;
+    assert_eq!(over_seat_limit.status(), StatusCode::PAYMENT_REQUIRED);
+    let outsider = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/organization",
+        "m2-outsider",
+        None,
+    )
+    .await;
+    assert_eq!(outsider.status(), StatusCode::NOT_FOUND);
+    let outsider_workspace = send_auth(
+        router.clone(),
+        "GET",
+        &format!("/api/v1/staff/workspaces/{first_workspace_id}"),
+        "m2-outsider",
+        None,
+    )
+    .await;
+    assert_eq!(outsider_workspace.status(), StatusCode::NOT_FOUND);
+    let outsider_action = send_auth(
+        router.clone(),
+        "POST",
+        &format!("/api/v1/staff/workspaces/{first_workspace_id}/actions"),
+        "m2-outsider",
+        Some(json!({
+            "title": "Cross-tenant write",
+            "instructions": "This must never be created.",
+            "due_at": "2026-08-30T14:00:00+00:00"
+        })),
+    )
+    .await;
+    assert_eq!(outsider_action.status(), StatusCode::NOT_FOUND);
+
+    let settings = send_auth(
+        router.clone(),
+        "PATCH",
+        "/api/v1/staff/organization",
+        "m2-owner",
+        Some(json!({
+            "name": "Juniper Works Ltd",
+            "time_zone": "Europe/London",
+            "retention_days": 365
+        })),
+    )
+    .await;
+    assert_eq!(settings.status(), StatusCode::OK);
+    assert_eq!(json_body(settings).await["retention_days"], 365);
+
+    sqlx::query("UPDATE subscriptions SET status = 'cancelled' WHERE organization_id = ?")
+        .bind(&organization_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let export = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/organization/export",
+        "m2-owner",
+        None,
+    )
+    .await;
+    assert_eq!(export.status(), StatusCode::OK);
+    assert_eq!(
+        export.headers()[header::CONTENT_DISPOSITION],
+        "attachment; filename=client-action-room-export.json"
+    );
+    let export_body = json_body(export).await;
+    assert_eq!(
+        export_body["organization"]["workspaces"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let wrong_delete = send_auth(
+        router.clone(),
+        "DELETE",
+        "/api/v1/staff/organization",
+        "m2-owner",
+        Some(json!({"confirmation": "wrong"})),
+    )
+    .await;
+    assert_eq!(wrong_delete.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let deletion = send_auth(
+        router.clone(),
+        "DELETE",
+        "/api/v1/staff/organization",
+        "m2-owner",
+        Some(json!({"confirmation": "Juniper Works Ltd"})),
+    )
+    .await;
+    assert_eq!(deletion.status(), StatusCode::ACCEPTED);
+    let scheduled_organization = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/organization",
+        "m2-owner",
+        None,
+    )
+    .await;
+    assert_eq!(scheduled_organization.status(), StatusCode::OK);
+    assert!(json_body(scheduled_organization).await["deletion_due_at"]
+        .as_str()
+        .is_some());
+    let blocked_workspace = send_auth(
+        router.clone(),
+        "GET",
+        "/api/v1/staff/workspace",
+        "m2-owner",
+        None,
+    )
+    .await;
+    assert_eq!(blocked_workspace.status(), StatusCode::NOT_FOUND);
+    let blocked_recreation = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/workspace",
+        "m2-owner",
+        Some(json!({
+            "firm_name": "Replacement firm",
+            "client_label": "Replacement client",
+            "client_actor": "Replacement actor"
+        })),
+    )
+    .await;
+    assert_eq!(blocked_recreation.status(), StatusCode::CONFLICT);
+    let cancelled = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/organization/deletion/cancel",
+        "m2-owner",
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(cancelled.status(), StatusCode::OK);
+    let restored = send_auth(
+        router,
+        "GET",
+        "/api/v1/staff/organization",
+        "m2-owner",
+        None,
+    )
+    .await;
+    assert_eq!(restored.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn scheduled_organization_deletion_purges_owned_records_at_seven_days() {
+    let state = state().await;
+    let router = app(state.clone());
+    let created = send_auth(
+        router.clone(),
+        "POST",
+        "/api/v1/staff/workspace",
+        "delete-owner",
+        Some(json!({
+            "firm_name": "Delete Test Firm",
+            "client_label": "Private client",
+            "client_actor": "Taylor"
+        })),
+    )
+    .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let deletion = send_auth(
+        router.clone(),
+        "DELETE",
+        "/api/v1/staff/organization",
+        "delete-owner",
+        Some(json!({"confirmation": "Delete Test Firm"})),
+    )
+    .await;
+    assert_eq!(deletion.status(), StatusCode::ACCEPTED);
+
+    assert!(state.set_test_clock(Utc.with_ymd_and_hms(2026, 9, 4, 13, 59, 59).unwrap()));
+    assert_eq!(state.purge_expired().await.unwrap(), 0);
+    let before_due: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM organizations")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(before_due, 1);
+
+    assert!(state.set_test_clock(Utc.with_ymd_and_hms(2026, 9, 4, 14, 0, 0).unwrap()));
+    assert_eq!(state.purge_expired().await.unwrap(), 2);
+    for table in ["organizations", "workspaces", "memberships", "staff_users"] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "{table} should be empty after deletion");
+    }
+    let deleted = send_auth(
+        router,
+        "GET",
+        "/api/v1/staff/organization",
+        "delete-owner",
+        None,
+    )
+    .await;
+    assert_eq!(deleted.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

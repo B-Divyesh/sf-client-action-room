@@ -24,8 +24,13 @@ Try the deployed sample at <https://client-action-room.sociobot.in/demo>.
 - A firm starts with an empty, isolated workspace that persists.
 - Demo traffic stays on this site, data lasts at most 24 hours, and leaving deletes the room.
 - Staff workspace requests reject missing and invalid access tokens.
+- Firm owners can choose retention, download a JSON record, and cancel a scheduled deletion.
+- A firm without a recurring entitlement cannot add paid workspaces or staff seats.
+- Starter is planned at $49 per month; checkout remains unavailable until recurring offers are registered.
 
-The public sandbox runs all four action types without an account. “Start for real” opens a signed-in, empty firm workspace for durable approval requests. File, choice, external-link, billing, and email delivery remain later firm-workspace milestones.
+The public sandbox runs all four action types without an account. The M2 server persists isolated firms, staff roles, approval workspaces, exports, retention settings, and deletion recovery. Local signed-token fixtures cover the staff API path.
+
+The live Entra callback still needs operator confirmation. The recurring Sociobot offers are not registered, so checkout and entitlement reconciliation are not advertised as working. File, choice, external-link, and email delivery remain later firm-workspace milestones.
 
 ## Demo boundary
 
@@ -41,7 +46,7 @@ Client link secrets travel in URL fragments. The browser removes the fragment af
 - A non-root multi-stage container that serves the API and built web application on `PORT`.
 - ClamAV with build-time signatures. The server records an upload only after a clean scan result.
 
-Staff authentication uses the shared Sociobot Microsoft Entra tenant. Staff access rejects missing or invalid tokens.
+Staff authentication uses the shared Sociobot Microsoft Entra tenant. The API validates RS256 signatures, the discovered issuer, audience, tenant, time claims, and signing-key IDs. Staff records use the stable `oid` claim.
 
 ## Run locally
 
@@ -98,6 +103,7 @@ Demo traffic stays on this site. Only a client-chosen external action can open a
 - [Visual system](.factory/design.md)
 - [Claims](.factory/claims.json)
 - [M1 handoff](.factory/handoff-m1.md)
+- [M2 handoff](.factory/handoff-m2.md)
 
 ## License
 

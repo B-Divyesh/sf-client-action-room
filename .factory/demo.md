@@ -1,9 +1,9 @@
 # Demo sandbox contract
 
-Status: **implemented and hardened in repair 2**
+Status: **implemented in M1 and preserved by the M2 account boundary**
 
 - Entry: `https://client-action-room.sociobot.in/demo` and `https://client-action-room.sociobot.in/?demo=1`
-- Local entry after M1: `http://localhost:5173/demo`
+- Local entry after `npm run build:web` and `npm run dev:api`: `http://localhost:8080/demo`
 - Lifetime: anonymous backend session, hard expiry at 24 hours
 - Namespace: a random SQLite workspace with `namespace = 'demo'`; it has no organization ID
 - Browser state: demo-only secure cookie and optional keys prefixed `demo:client-action-room:`; never `sb_license:*`, MSAL, or real app storage

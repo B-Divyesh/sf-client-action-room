@@ -12,7 +12,7 @@ use crate::scanner::MalwareScanner;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -65,6 +65,9 @@ impl AppState {
 
         let mut state = Self::new(build_sha, pool, fixed_now, dist_dir);
         state.auth = AuthService::from_env();
+        if state.auth.warm().await.is_err() {
+            warn!("identity discovery was unavailable at startup; protected requests will retry")
+        }
         state.scanner = MalwareScanner::from_env();
         state.database_path = database_path;
         state.persist_path = persist_path;
@@ -123,16 +126,52 @@ impl AppState {
 
     pub async fn purge_expired(&self) -> Result<u64, sqlx::Error> {
         let now = self.now().to_rfc3339();
+        let mut tx = self.pool.begin().await?;
         let expired_files = sqlx::query("DELETE FROM uploads WHERE expires_at <= ?")
             .bind(&now)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
-        let expired_workspaces =
+        let expired_demo_workspaces =
             sqlx::query("DELETE FROM workspaces WHERE namespace = 'demo' AND expires_at <= ?")
-                .bind(now)
-                .execute(&self.pool)
+                .bind(&now)
+                .execute(&mut *tx)
                 .await?;
-        Ok(expired_files.rows_affected() + expired_workspaces.rows_affected())
+        let deleting_staff: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT m.staff_oid FROM memberships m
+             JOIN organizations o ON o.id = m.organization_id
+             WHERE o.deletion_due_at IS NOT NULL AND o.deletion_due_at <= ?",
+        )
+        .bind(&now)
+        .fetch_all(&mut *tx)
+        .await?;
+        let deleted_real_workspaces = sqlx::query(
+            "DELETE FROM workspaces WHERE namespace = 'real' AND organization_id IN
+             (SELECT id FROM organizations WHERE deletion_due_at IS NOT NULL AND deletion_due_at <= ?)",
+        )
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        let deleted_organizations = sqlx::query(
+            "DELETE FROM organizations WHERE deletion_due_at IS NOT NULL AND deletion_due_at <= ?",
+        )
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        for oid in deleting_staff {
+            sqlx::query(
+                "DELETE FROM staff_users WHERE oid = ?
+                 AND NOT EXISTS (SELECT 1 FROM memberships WHERE staff_oid = ?)",
+            )
+            .bind(&oid)
+            .bind(&oid)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(expired_files.rows_affected()
+            + expired_demo_workspaces.rows_affected()
+            + deleted_real_workspaces.rows_affected()
+            + deleted_organizations.rows_affected())
     }
 
     pub async fn persist_snapshot(&self) -> Result<()> {

@@ -1,12 +1,13 @@
 # Landing copy audit
 
-Audited: 2026-09-05 after repair 2. Counts split on spaces. No landing text exceeds 22 words or uses a banned marketing term.
+Audited: 2026-09-06 for the M2 candidate. Counts split on spaces. No landing text exceeds 22 words or uses a banned marketing term.
 
 | Words | Visible text |
 |---:|---|
 | 3 | Client Action Room |
 | 1 | Demo |
 | 3 | How it works |
+| 2 | Sign in |
 | 1 | Privacy |
 | 3 | Client action requests |
 | 6 | Get client actions done on time. |
@@ -46,10 +47,18 @@ Audited: 2026-09-05 after repair 2. Counts split on spaces. No landing text exce
 | 6 | The demo stays on this site. |
 | 9 | It records reminder schedules but does not send email. |
 | 4 | Read the privacy details |
+| 1 | Pricing |
+| 3 | Planned recurring plans |
+| 3 | Starter · $49/month |
+| 7 | Five client workspaces and three staff seats. |
+| 3 | Studio · $99/month |
+| 7 | Twenty client workspaces and ten staff seats. |
+| 10 | Checkout is not available until Sociobot registers these recurring offers. |
+| 3 | Check plan status |
 | 7 | One short action list for every client. |
 | 1 | Terms |
 | 4 | Built by Param Factory |
-| 7 | M1 · municipal archive artwork by Param Factory |
+| 8 | M2 · municipal archive artwork by Param Factory |
 
 ## Terminology
 

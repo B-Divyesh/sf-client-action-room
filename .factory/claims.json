@@ -126,5 +126,21 @@
     "where": "workspace sign-in page, README",
     "test": "npm run test:e2e -- --grep @claim:staff-auth",
     "sandbox": "fresh browser context; request the staff workspace without a token and with an invalid token; assert 401 and WWW-Authenticate for both"
+  },
+  {
+    "id": "firm-owner-controls",
+    "milestone": "M2",
+    "claim": "Firm owners can choose retention, export records, cancel deletion, and cannot add unpaid workspaces or seats",
+    "where": "firm settings, privacy page, README",
+    "test": "npm run test:e2e -- --grep @claim:firm-owner-controls",
+    "sandbox": "local signed-in owner fixture; create an isolated firm; change retention; prove unpaid workspace and seat additions are denied; inspect its JSON export; schedule deletion for exactly seven days; prove its settings remain reachable for recovery while its workspace is blocked; cancel and prove access returns"
+  },
+  {
+    "id": "billing-registration-state",
+    "milestone": "M2",
+    "claim": "Starter is planned at $49 per month and checkout remains unavailable until recurring offers are registered",
+    "where": "landing pricing, plan page, terms, README",
+    "test": "npm run test:e2e -- --grep @claim:billing-registration-state",
+    "sandbox": "fresh public page; assert both planned monthly prices and the unavailable-checkout notice are visible; assert there is no checkout link; local signed-in fixture also confirms the entitlement endpoint reports recurring_billing_not_registered"
   }
 ]

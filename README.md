@@ -79,11 +79,11 @@ docker run --rm -p 8080:8080 client-action-room
 curl http://localhost:8080/health
 ```
 
-The image runs as a non-root user, creates its SQLite file under `/data`, applies migrations at startup, and serves `/health` with the build SHA. The factory deployment mounts Azure Files and uses one writer replica.
+The image runs as a non-root user, applies migrations at startup, and serves `/health` with the build SHA. With the factory deployment, SQLite uses a local working copy and atomically snapshots each write to the mounted `/data` share. The service runs one writer replica.
 
 ## Deploy
 
-The factory deploys one replica to Azure Container Apps with SQLite on `/data`. It owns DNS, CIAM redirect registration, and recurring-price registration. Do not deploy this as a static-only site.
+The factory deploys one replica to Azure Container Apps with durable state on `/data`. It owns DNS, CIAM redirect registration, and recurring-price registration. Do not deploy this as a static-only site.
 
 ## Privacy and legal
 

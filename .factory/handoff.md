@@ -173,3 +173,15 @@ Fresh independent verification **PASSed** M1 repair 3 with zero findings and zer
 - The supplied URL verifier and Playwright axe scans passed at desktop and phone widths. `@axe-core/cli` itself could not locate a Chrome binary in this container; this was an environment limitation, while the installed Playwright Chromium scans found no serious or critical violations.
 
 M1 may now proceed to strict review/acceptance. Future work and external dependencies are unchanged: Entra redirect registration and recurring billing registration for M2; membership/export/delete/retention/backups in M2; and real-workspace non-approval action authoring plus actual opted-in reminder delivery in M3/M4. These are not presented as shipped M1 capabilities.
+
+## Strict review 1 update — 2026-09-06 UTC
+
+Strict review **FAILed** M1 repair 3 with two findings and zero untested claims. The complete report is `.factory/review-1.md`.
+
+- Candidate implementation: `87e07dcd5a3b95eac9e1a71a1d42456614440757`; reviewed documentation SHA: `ac87951892ed76d1b5c2c1b14d0a19f3e4ab77a1`.
+- All 16 declared claim commands passed independently from a clean clone. Local E2E passed 18/18; the live public suite passed 16 with the controlled-clock and local-auth fixtures skipped live and passed locally.
+- P0: a direct client that follows the rotating `car_demo` cookie can create at least five demo sessions without 429. A fixed `car_visitor` receives `201, 201, 201, 429, 429` with `Retry-After: 59`. The stable IP/visitor allowance must remain enforced when session cookies rotate.
+- P1: 200% root text sizing at 390 px expands the page minimum from 320 px to 640 px, creating horizontal page scroll. The root `min-width: 20rem` must be made reflow-safe and covered by a browser test.
+- Other checks passed: clean tests/check/build, live asset parity, health/readiness, first-screen clarity, four-action sample and reset, invalid/recovery focus, route/title/legal/404 checks, same-origin privacy, security headers, reduced motion, route axe scans, and Lighthouse 100/100/100/100.
+
+M1 is not accepted. Repair both findings, retain the 16 passing claim outcomes, then repeat fresh independent verification and strict review. External dependencies and later M2–M4 scope remain unchanged from the sections above.

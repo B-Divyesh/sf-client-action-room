@@ -9,11 +9,12 @@ M1 repair 2 is implemented, deployed, and locally and live verified. Independent
 - Live URL: <https://client-action-room.sociobot.in>
 - Deployed implementation SHA: `b059adf1d4b08f755a2d1a08d3a77e2052586648`
 - Clean-checkout test SHA: `c567e9448f313f9b6ed46a00d8f89c1105ea415f`
+- Documentation and evidence SHA: `92368fcdb35e73425aba44979bd362c2d30f713e`
 - Deployed image digest: `sha256:6bccd857ee5ed43e345057962ceaa486b9f4b6b5d9dec26cd4a02945dc6be8c8`
 - Active revision: `sf-client-action-room--0000014`
 - Runtime: one replica, 1 CPU, 2 GiB; local SQLite working copy with atomic snapshots to the fleet-mounted `/data` share
 
-The implementation and test/documentation SHAs differ because `c567e94` only extends browser waits for real scanner and live network outcomes. It does not change the shipped application.
+The implementation and test SHAs differ because `c567e94` only extends browser waits for real scanner and live network outcomes. It does not change the shipped application. `92368fc` adds the final operational documentation and deployment-script guard.
 
 ## Recorded findings and disposition
 

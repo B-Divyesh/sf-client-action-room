@@ -89,3 +89,9 @@ M1 now ships the full approval loop, plus demonstrable upload, choice, external-
 - The product makes no offline promise. Offline/update behavior is therefore not a shipped claim.
 
 The catalog description is a verb-first 93-character line and is copied to `/work/.evidence/catalog-description.txt` during handoff.
+
+## Verification 3 update — 2026-09-06 UTC
+
+Independent verification reviewed implementation `b059adf1d4b08f755a2d1a08d3a77e2052586648` and the later documentation commit `d4dd83acf0fea73c3da8b04274b4cf64d35f9547`. The live assets exactly matched a fresh candidate build; the live health build id was the documentation SHA.
+
+The verifier passed all local gates, all 13 declared claim commands, the live public browser suite, accessibility checks, rate limits, and a live restart-persistence check. The verdict is nevertheless **FAIL** in `.factory/verification-3.md`: three public claims lack observable tagged tests (the 5 MB upload boundary, 24-hour uploaded-file expiry, and no-email demo reminders). M1 must not be marked accepted until those claims are tested or removed/narrowed. M2 and external dependencies remain as listed above.

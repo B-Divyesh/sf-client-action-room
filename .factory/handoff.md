@@ -5,6 +5,7 @@ Date: 2026-09-06 UTC
 M2 is implemented and deployed as a builder candidate. Fresh independent verification and strict review are still required.
 
 - Implementation SHA: `d82ccfc2d8f27338232192c763e17abcf699d812`
+- Documentation and evidence SHA: `00f391988d2ce0683b68cbb1c768674b49cc9d8c`
 - Image digest: `sha256:d2a08314e46cbdb3f37b0a95bcd67e99c87449615acca9c31a5d1547d17258ec`
 - Live URL: <https://client-action-room.sociobot.in>
 - Health reports the implementation SHA; readiness reports the database and malware scanner ready.

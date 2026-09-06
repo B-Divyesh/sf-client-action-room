@@ -9,13 +9,14 @@ M2 is a deployed builder candidate. It adds durable firm accounts, tenant-scoped
 - Live URL: <https://client-action-room.sociobot.in>
 - Implementation SHA: `d82ccfc2d8f27338232192c763e17abcf699d812`
 - Implementation commits: `41d9b9d7e404a0aadfac0601cbcc2a0f7a8de51f`, `d82ccfc2d8f27338232192c763e17abcf699d812`
+- Documentation and evidence SHA: `00f391988d2ce0683b68cbb1c768674b49cc9d8c`
 - Image digest: `sha256:d2a08314e46cbdb3f37b0a95bcd67e99c87449615acca9c31a5d1547d17258ec`
 - Live health: `{"status":"ok","build_sha":"d82ccfc2d8f27338232192c763e17abcf699d812"}`
 - Live readiness: database and malware scanner report `ready`
 - Runtime: one replica with SQLite, generated local secrets, and uploads on the fleet-created `/data` mount
 - Review state: fresh independent M2 verification and strict review are required before acceptance
 
-Later handoff and pointer commits are documentation-only. They do not require a new image; the health build ID above is the implementation classification.
+The later handoff commit and its pointer are documentation-only. They do not require a new image; the health build ID above is the implementation classification.
 
 ## M2 scope delivered
 
